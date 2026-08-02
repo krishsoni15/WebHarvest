@@ -191,12 +191,45 @@ export default function MirrorDashboard() {
 
     eventSource.onerror = () => {
       eventSource.close();
+      // On SSE error (e.g. Vercel timeout), fetch overview to check if completed
+      fetch(`/api/mirror/${id}/overview`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.stats && (data.stats.files > 0 || data.stats.pages > 0)) {
+            setStatus('completed');
+            setLoadingProgress(100);
+            fetchDetails();
+          }
+        })
+        .catch(() => {});
     };
 
     return () => {
       eventSource.close();
     };
   }, [id]);
+
+  // Fallback Polling Effect for Serverless Environments (Vercel)
+  useEffect(() => {
+    if (!id || status !== 'downloading') return;
+
+    const checkStatus = async () => {
+      try {
+        const res = await fetch(`/api/mirror/${id}/overview`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.stats && (data.stats.files > 0 || data.stats.pages > 0)) {
+            setStatus('completed');
+            setLoadingProgress(100);
+            fetchDetails();
+          }
+        }
+      } catch {}
+    };
+
+    const interval = setInterval(checkStatus, 2500);
+    return () => clearInterval(interval);
+  }, [id, status]);
 
   // Simulated progress logic for download phase
   useEffect(() => {

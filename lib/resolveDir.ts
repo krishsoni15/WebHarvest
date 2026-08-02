@@ -130,8 +130,17 @@ export function ensureJobExists(id: string): boolean {
 
   if (!fs.existsSync(baseDir)) return false;
 
+  const jobJsonPath = path.join(baseDir, 'job.json');
+  if (fs.existsSync(jobJsonPath)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(jobJsonPath, 'utf-8'));
+      activeJobs.set(id, data);
+      return true;
+    } catch {}
+  }
+
   try {
-    const items = fs.readdirSync(baseDir).filter(f => !f.startsWith('.') && f !== 'crawl_logs.txt');
+    const items = fs.readdirSync(baseDir).filter(f => !f.startsWith('.') && f !== 'crawl_logs.txt' && f !== 'job.json');
     if (items.length === 0) return false;
 
     const subdirs = items.filter(f => {

@@ -5,6 +5,7 @@ import fs from 'fs';
 import os from 'os';
 import { activeJobs, activeProcesses, Job } from '@/lib/jobStore';
 import { getBaseDownloadDir } from '@/lib/resolveDir';
+import { runNativeMirror } from '@/lib/nativeMirror';
 
 // Rate limiting: max concurrent downloads
 const MAX_CONCURRENT_JOBS = 5;
@@ -21,7 +22,7 @@ const BLOCKED_PATTERNS = [
 ];
 
 function prepareWgetBinary(): string {
-  // Always prefer system 'wget' if available in PATH (avoids static glibc DNS resolution issues)
+  // Always prefer system 'wget' if available in PATH
   try {
     const check = spawnSync('wget', ['--version']);
     if (check.status === 0) {
@@ -36,15 +37,12 @@ function prepareWgetBinary(): string {
     const sourcePath = path.join(process.cwd(), 'bin', 'wget');
     
     try {
-      if (!fs.existsSync(targetPath)) {
+      if (!fs.existsSync(targetPath) && fs.existsSync(sourcePath)) {
         fs.copyFileSync(sourcePath, targetPath);
         fs.chmodSync(targetPath, '755');
+        return targetPath;
       }
-      return targetPath;
-    } catch (err) {
-      console.error("Failed to copy/chmod bundled wget binary:", err);
-      return 'wget';
-    }
+    } catch {}
   }
 
   // Locally, use the bundled binary as last resort
@@ -141,7 +139,20 @@ export async function POST(req: NextRequest) {
     };
     activeJobs.set(id, newJob);
 
-    // Spawn wget background process
+    // Save job state to disk for stateless serverless functions
+    try {
+      fs.writeFileSync(path.join(downloadDir, 'job.json'), JSON.stringify(newJob, null, 2));
+    } catch {}
+
+    const isServerless = !!(process.env.VERCEL || process.env.NOW_BUILDER);
+
+    if (isServerless) {
+      // Execute high-speed native Node mirroring for Vercel
+      await runNativeMirror(id, url, resolvedHostname, downloadDir);
+      return NextResponse.json({ id });
+    }
+
+    // Spawn wget background process locally
     const logFilePath = path.join(downloadDir, 'crawl_logs.txt');
     const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
 
@@ -149,22 +160,31 @@ export async function POST(req: NextRequest) {
     const domains = `${cleanHostname},www.${cleanHostname}`;
 
     const wgetExecutable = prepareWgetBinary();
-    const wgetProcess = spawn(wgetExecutable, [
-      '--mirror',
-      '--page-requisites',
-      '--adjust-extension',
-      '--convert-links',
-      '--no-parent',
-      '--span-hosts',
-      `--domains=${domains}`,
-      '--timeout=8',
-      '--tries=1',
-      '--wait=0',
-      '--no-check-certificate',
-      '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
-      `--directory-prefix=${downloadDir}`,
-      url
-    ]);
+    let wgetProcess: any;
+
+    try {
+      wgetProcess = spawn(wgetExecutable, [
+        '--mirror',
+        '--page-requisites',
+        '--adjust-extension',
+        '--convert-links',
+        '--no-parent',
+        '--span-hosts',
+        `--domains=${domains}`,
+        '--timeout=8',
+        '--tries=1',
+        '--wait=0',
+        '--no-check-certificate',
+        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+        `--directory-prefix=${downloadDir}`,
+        url
+      ]);
+    } catch (e) {
+      // Fallback to Native Node Scraper if spawn fails
+      console.warn("Failed to spawn wget, falling back to Native Mirroring:", e);
+      await runNativeMirror(id, url, resolvedHostname, downloadDir);
+      return NextResponse.json({ id });
+    }
 
     wgetProcess.stdout.pipe(logStream);
     wgetProcess.stderr.pipe(logStream);
@@ -178,18 +198,16 @@ export async function POST(req: NextRequest) {
 
     activeProcesses.set(id, wgetProcess);
 
-    wgetProcess.on('close', (code) => {
+    wgetProcess.on('close', (code: number | null) => {
       clearTimeout(timeout);
       logStream.end();
       activeProcesses.delete(id);
       const job = activeJobs.get(id);
       if (job) {
-        const sitePath = path.join(downloadDir, resolvedHostname);
-        // Check if downloadDir has any files or directories downloaded
         let hasFiles = false;
         try {
           if (fs.existsSync(downloadDir)) {
-            const items = fs.readdirSync(downloadDir).filter(f => !f.startsWith('.'));
+            const items = fs.readdirSync(downloadDir).filter(f => !f.startsWith('.') && f !== 'job.json');
             hasFiles = items.length > 0;
           }
         } catch {}
@@ -202,20 +220,18 @@ export async function POST(req: NextRequest) {
         }
         job.completedAt = Date.now();
         activeJobs.set(id, job);
+        try {
+          fs.writeFileSync(path.join(downloadDir, 'job.json'), JSON.stringify(job, null, 2));
+        } catch {}
       }
     });
 
-    wgetProcess.on('error', (err) => {
+    wgetProcess.on('error', async (err: any) => {
       clearTimeout(timeout);
       logStream.end();
       activeProcesses.delete(id);
-      const job = activeJobs.get(id);
-      if (job) {
-        job.status = 'failed';
-        job.error = err.message || 'Failed to execute wget process';
-        job.completedAt = Date.now();
-        activeJobs.set(id, job);
-      }
+      // Fallback to native mirror if process error
+      await runNativeMirror(id, url, resolvedHostname, downloadDir);
     });
 
     return NextResponse.json({ id });

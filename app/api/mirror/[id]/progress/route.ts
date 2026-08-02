@@ -2,21 +2,20 @@ import { NextRequest } from 'next/server';
 import path from 'path';
 import fs from 'fs';
 import { activeJobs } from '@/lib/jobStore';
-import { resolveTargetDir, getBaseDownloadDir } from '@/lib/resolveDir';
+import { resolveTargetDir, getBaseDownloadDir, ensureJobExists } from '@/lib/resolveDir';
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const job = activeJobs.get(id);
-
-  if (!job) {
+  if (!ensureJobExists(id)) {
     return new Response(JSON.stringify({ error: 'Job not found' }), {
       status: 404,
       headers: { 'Content-Type': 'application/json' },
     });
   }
+  const job = activeJobs.get(id)!;
 
   const responseStream = new TransformStream();
   const writer = responseStream.writable.getWriter();
