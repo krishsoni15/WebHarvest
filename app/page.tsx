@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Globe, ArrowRight, Clock, Trash2, CheckCircle2, Layers, HardDrive, FileText, Image as ImageIcon, Info, Code2, Zap, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { Globe, ArrowRight, Clock, Trash2, CheckCircle2, Layers, HardDrive, FileText, Image as ImageIcon, Info, Code2, Zap, ShieldCheck, Sparkles, X, AlertTriangle } from 'lucide-react';
 
 interface RecentJob {
   id: string;
@@ -20,19 +20,17 @@ export default function Home() {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [starCount, setStarCount] = useState<number | null>(null);
+  const [starCount, setStarCount] = useState<number>(3);
   const [recentJobs, setRecentJobs] = useState<RecentJob[]>([]);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
-    fetch(`https://api.github.com/repos/krishsoni15/WebHarvest?t=${Date.now()}`, {
-      cache: 'no-store',
-    })
+    fetch('/api/github-stars')
       .then((res) => res.json())
       .then((data) => {
-        if (typeof data.stargazers_count === 'number') {
-          setStarCount(data.stargazers_count);
+        if (typeof data.stars === 'number') {
+          setStarCount(data.stars);
         }
       })
       .catch(() => {});
@@ -178,7 +176,7 @@ export default function Home() {
             <span className="font-semibold tracking-tight">GitHub</span>
             <span className="h-4 w-px bg-neutral-800" />
             <span className="flex items-center gap-1 text-amber-400 group-hover:text-amber-300 transition-colors font-mono font-bold text-sm">
-              <span className="text-[12px] select-none">★</span>{starCount !== null ? (starCount >= 1000 ? (starCount / 1000).toFixed(1) + 'k' : starCount) : '0'}
+              <span className="text-[12px] select-none">★</span>{starCount >= 1000 ? (starCount / 1000).toFixed(1) + 'k' : starCount}
             </span>
           </a>
         </div>
@@ -418,6 +416,35 @@ export default function Home() {
                     </div>
                     <p className="text-neutral-400 text-[11px] leading-relaxed">
                       Lightweight, zero-DB local-first architecture with instant ZIP export capability.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* URL Compatibility Guidelines */}
+              <div>
+                <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-widest font-mono mb-2 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  URL Compatibility & Guidelines
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                  <div className="bg-emerald-950/20 border border-emerald-900/40 p-3 rounded-xl space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold text-emerald-400">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      Works 100% (Public Web)
+                    </div>
+                    <p className="text-neutral-400 text-[11px] leading-relaxed">
+                      Landing pages, portfolios, blogs, documentation, e-commerce stores, and public web applications.
+                    </p>
+                  </div>
+
+                  <div className="bg-amber-950/20 border border-amber-900/40 p-3 rounded-xl space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-400">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      Auth & DRM Notice
+                    </div>
+                    <p className="text-neutral-400 text-[11px] leading-relaxed">
+                      Protected sites requiring login, paywalled dashboards, OAuth portals, and DRM streams (e.g. YouTube/Netflix) cannot be mirrored.
                     </p>
                   </div>
                 </div>

@@ -59,20 +59,18 @@ export default function MirrorDashboard() {
   const id = params.id as string;
   const router = useRouter();
 
-  const [starCount, setStarCount] = useState<number | null>(null);
+  const [starCount, setStarCount] = useState<number>(3);
   const [origin, setOrigin] = useState('http://localhost:3000');
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       setOrigin(window.location.origin);
     }
-    fetch(`https://api.github.com/repos/krishsoni15/WebHarvest?t=${Date.now()}`, {
-      cache: 'no-store',
-    })
+    fetch('/api/github-stars')
       .then((res) => res.json())
       .then((data) => {
-        if (typeof data.stargazers_count === 'number') {
-          setStarCount(data.stargazers_count);
+        if (typeof data.stars === 'number') {
+          setStarCount(data.stars);
         }
       })
       .catch(() => {});
@@ -601,7 +599,7 @@ export default function MirrorDashboard() {
               <span className="font-semibold tracking-tight">GitHub</span>
               <span className="h-4 w-px bg-neutral-800" />
               <span className="flex items-center gap-1 text-amber-400 group-hover:text-amber-300 transition-colors font-mono font-bold text-sm">
-                <span className="text-[12px] select-none">★</span>{starCount !== null ? (starCount >= 1000 ? (starCount / 1000).toFixed(1) + 'k' : starCount) : '0'}
+                <span className="text-[12px] select-none">★</span>{starCount >= 1000 ? (starCount / 1000).toFixed(1) + 'k' : starCount}
               </span>
             </a>
 
