@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
+import { resolveTargetDir, ensureJobExists } from '@/lib/resolveDir';
 import { activeJobs } from '@/lib/jobStore';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(
   req: NextRequest,
@@ -9,56 +12,30 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const job = activeJobs.get(id);
 
-    if (!job) {
+    if (!ensureJobExists(id)) {
       return NextResponse.json({ error: 'Job not found' }, { status: 404 });
     }
 
-    const baseDir = path.join(process.cwd(), 'tmp', 'downloads', id);
-    let targetDir = path.join(baseDir, job.hostname);
-    if (!fs.existsSync(targetDir)) {
-      if (job.hostname.startsWith('www.')) {
-        const noWww = path.join(baseDir, job.hostname.substring(4));
-        if (fs.existsSync(noWww)) targetDir = noWww;
-      } else {
-        const withWww = path.join(baseDir, 'www.' + job.hostname);
-        if (fs.existsSync(withWww)) targetDir = withWww;
+    const job = activeJobs.get(id)!;
+
+    // Caching layer: return immediately if completed or cached within last 4 seconds
+    const now = Date.now();
+    if (job.cachedOverview) {
+      if (job.status === 'completed' || (now - (job.lastOverviewUpdate || 0) < 4000)) {
+        return NextResponse.json(job.cachedOverview);
       }
     }
 
-    if (!fs.existsSync(targetDir)) {
-      try {
-        const subdirs = fs.readdirSync(baseDir).filter(f => {
-          const p = path.join(baseDir, f);
-          return fs.statSync(p).isDirectory() && !f.startsWith('.');
-        });
-        const indexMatch = subdirs.find(d => fs.existsSync(path.join(baseDir, d, 'index.html')));
-        if (indexMatch) {
-          targetDir = path.join(baseDir, indexMatch);
-        } else if (subdirs.length > 0) {
-          const primaryDir = subdirs.find(d => !d.includes('cdn') && !d.includes('google') && !d.includes('cloudflare'));
-          if (primaryDir) {
-            targetDir = path.join(baseDir, primaryDir);
-          }
-        }
-      } catch {}
-    }
+    const baseDir = path.join(process.cwd(), 'tmp', 'downloads', id);
+    const targetDir = resolveTargetDir(id, job.hostname);
 
-    if (!fs.existsSync(baseDir)) {
+    if (!fs.existsSync(targetDir)) {
       return NextResponse.json({ error: 'Download directory not found' }, { status: 404 });
     }
 
-    const stats = {
-      pages: 0,
-      images: 0,
-      files: 0,
-      size: 0,
-    };
+    const stats = { pages: 0, images: 0, files: 0, size: 0 };
 
-    const dirToScan = fs.existsSync(targetDir) ? targetDir : baseDir;
-
-    // Scan directory
     function walk(dir: string) {
       try {
         const list = fs.readdirSync(dir);
@@ -84,13 +61,31 @@ export async function GET(
       } catch {}
     }
 
-    if (fs.existsSync(dirToScan)) {
-      walk(dirToScan);
-    }
+    walk(targetDir);
 
-    // Heuristics for Framework/CMS Stack detection
+    // Enhanced tech stack detection
     let techStack = 'Static HTML/CSS';
-    const indexHtmlPath = path.join(dirToScan, 'index.html');
+    let indexHtmlPath = path.join(targetDir, 'index.html');
+
+    if (!fs.existsSync(indexHtmlPath)) {
+      try {
+        const subdirs = fs.readdirSync(baseDir).filter(f => {
+          try {
+            return fs.statSync(path.join(baseDir, f)).isDirectory() && !f.startsWith('.');
+          } catch { return false; }
+        });
+        const cleanHostname = job.hostname.toLowerCase().replace('www.', '');
+        const sortedSubdirs = subdirs.sort((a, b) => {
+          const aMatch = a.toLowerCase().includes(cleanHostname) ? 1 : 0;
+          const bMatch = b.toLowerCase().includes(cleanHostname) ? 1 : 0;
+          return bMatch - aMatch;
+        });
+        const indexMatch = sortedSubdirs.find(d => fs.existsSync(path.join(baseDir, d, 'index.html')));
+        if (indexMatch) {
+          indexHtmlPath = path.join(baseDir, indexMatch, 'index.html');
+        }
+      } catch {}
+    }
 
     if (fs.existsSync(indexHtmlPath)) {
       try {
@@ -105,19 +100,33 @@ export async function GET(
           techStack = 'Squarespace';
         } else if (/webflow\.com|data-wf-page/i.test(content)) {
           techStack = 'Webflow';
-        } else if (/_next\/static|next\.js/i.test(content)) {
+        } else if (/_next\/static|__next|next\.js/i.test(content)) {
           techStack = 'Next.js (React)';
-        } else if (/vue\.js|nuxt/i.test(content)) {
-          techStack = 'Vue.js';
-        } else if (/angular/i.test(content)) {
+        } else if (/vue\.js|nuxt|__nuxt/i.test(content)) {
+          techStack = 'Vue.js / Nuxt';
+        } else if (/ng-version|angular/i.test(content)) {
           techStack = 'Angular';
+        } else if (/gatsby/i.test(content)) {
+          techStack = 'Gatsby (React)';
+        } else if (/ghost\.org|ghost-/i.test(content)) {
+          techStack = 'Ghost CMS';
+        } else if (/drupal/i.test(content)) {
+          techStack = 'Drupal';
+        } else if (/joomla/i.test(content)) {
+          techStack = 'Joomla';
+        } else if (/tailwindcss|tailwind/i.test(content)) {
+          techStack = 'Tailwind CSS';
+        } else if (/bootstrap/i.test(content)) {
+          techStack = 'Bootstrap';
+        } else if (/react/i.test(content)) {
+          techStack = 'React';
         } else if (/jquery/i.test(content)) {
-          techStack = 'jQuery Library';
+          techStack = 'jQuery';
         }
       } catch {}
     }
 
-    return NextResponse.json({
+    const result = {
       id: job.id,
       url: job.url,
       hostname: job.hostname,
@@ -128,16 +137,21 @@ export async function GET(
         files: stats.files,
         size: formatBytes(stats.size),
       },
-    });
+    };
+
+    job.cachedOverview = result;
+    job.lastOverviewUpdate = now;
+
+    return NextResponse.json(result);
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
   }
 }
 
 function formatBytes(bytes: number) {
-  if (bytes === 0) return '0 Bytes';
+  if (bytes === 0) return '0 B';
   const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }

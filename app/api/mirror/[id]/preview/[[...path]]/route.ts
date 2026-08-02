@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import path from 'path';
 import fs from 'fs';
 import mime from 'mime-types';
+import { resolveTargetDir, ensureJobExists } from '@/lib/resolveDir';
 import { activeJobs } from '@/lib/jobStore';
 
 export async function GET(
@@ -10,41 +11,15 @@ export async function GET(
 ) {
   try {
     const { id, path: pathSegments } = await params;
-    const job = activeJobs.get(id);
 
-    if (!job) {
+    // Ensure job exists (handles server restart / hot reload)
+    if (!ensureJobExists(id)) {
       return new Response('Job not found', { status: 404 });
     }
 
+    const job = activeJobs.get(id)!;
     const baseDir = path.join(process.cwd(), 'tmp', 'downloads', id);
-    let targetDir = path.join(baseDir, job.hostname);
-    if (!fs.existsSync(targetDir)) {
-      if (job.hostname.startsWith('www.')) {
-        const noWww = path.join(baseDir, job.hostname.substring(4));
-        if (fs.existsSync(noWww)) targetDir = noWww;
-      } else {
-        const withWww = path.join(baseDir, 'www.' + job.hostname);
-        if (fs.existsSync(withWww)) targetDir = withWww;
-      }
-    }
-
-    if (!fs.existsSync(targetDir)) {
-      try {
-        const subdirs = fs.readdirSync(baseDir).filter(f => {
-          const p = path.join(baseDir, f);
-          return fs.statSync(p).isDirectory() && !f.startsWith('.');
-        });
-        const indexMatch = subdirs.find(d => fs.existsSync(path.join(baseDir, d, 'index.html')));
-        if (indexMatch) {
-          targetDir = path.join(baseDir, indexMatch);
-        } else if (subdirs.length > 0) {
-          const primaryDir = subdirs.find(d => !d.includes('cdn') && !d.includes('google') && !d.includes('cloudflare'));
-          if (primaryDir) {
-            targetDir = path.join(baseDir, primaryDir);
-          }
-        }
-      } catch {}
-    }
+    const targetDir = resolveTargetDir(id, job.hostname);
 
     if (!fs.existsSync(targetDir)) {
       return new Response('Download files not found', { status: 404 });
@@ -52,51 +27,225 @@ export async function GET(
 
     // Default to index.html if no path is provided
     const segments = pathSegments && pathSegments.length > 0 ? pathSegments : ['index.html'];
-    const filePath = path.join(targetDir, ...segments);
+    const primaryPath = path.join(targetDir, ...segments);
+
+    // Helper to verify if a path can be resolved (either as a file or directory with index.html)
+    function resolveFileOrDirectoryIndex(p: string): string | null {
+      try {
+        if (!fs.existsSync(p)) return null;
+        const stat = fs.statSync(p);
+        if (stat.isDirectory()) {
+          const indexHtml = path.join(p, 'index.html');
+          if (fs.existsSync(indexHtml) && !fs.statSync(indexHtml).isDirectory()) {
+            return indexHtml;
+          }
+        } else {
+          return p;
+        }
+      } catch {}
+      return null;
+    }
+
+    let resolvedFilePath = resolveFileOrDirectoryIndex(primaryPath);
+    let pathFound = resolvedFilePath !== null;
+    let filePath = resolvedFilePath || primaryPath;
+
+    // Fallback: search across all subdirectories if not found in primary
+    if (!pathFound) {
+      try {
+        const subdirs = fs.readdirSync(baseDir).filter(f => {
+          try {
+            const p = path.join(baseDir, f);
+            return fs.statSync(p).isDirectory() && !f.startsWith('.');
+          } catch {
+            return false;
+          }
+        });
+
+        const primaryDomain = job.hostname.replace('www.', '');
+        const sortedSubdirs = subdirs.sort((a, b) => {
+          const aMatch = a.toLowerCase().includes(primaryDomain) ? 1 : 0;
+          const bMatch = b.toLowerCase().includes(primaryDomain) ? 1 : 0;
+          return bMatch - aMatch;
+        });
+
+        for (const dir of sortedSubdirs) {
+          const altPath = path.join(baseDir, dir, ...segments);
+          const resolvedAlt = resolveFileOrDirectoryIndex(altPath);
+          if (resolvedAlt) {
+            filePath = resolvedAlt;
+            pathFound = true;
+            break;
+          }
+        }
+      } catch {}
+    }
 
     // Prevent directory traversal attacks
-    const safeBase = path.resolve(targetDir);
+    const safeBaseJob = path.resolve(baseDir);
     const resolvedPath = path.resolve(filePath);
 
-    if (!resolvedPath.startsWith(safeBase)) {
+    if (!resolvedPath.startsWith(safeBaseJob)) {
       return new Response('Forbidden: Path traversal detected', { status: 403 });
     }
 
-    if (!fs.existsSync(filePath)) {
+    if (!pathFound) {
       return new Response(`File not found: ${segments.join('/')}`, { status: 404 });
     }
 
     const stat = fs.statSync(filePath);
     if (stat.isDirectory()) {
-      // If it's a directory, check if there's an index.html inside it
       const indexHtmlPath = path.join(filePath, 'index.html');
       if (fs.existsSync(indexHtmlPath)) {
-        const fileBuffer = fs.readFileSync(indexHtmlPath);
+        let fileBuffer = fs.readFileSync(indexHtmlPath);
         const mimeType = mime.lookup(indexHtmlPath) || 'text/html';
-        return new Response(fileBuffer, {
-          headers: {
-            'Content-Type': mimeType,
-            'X-Frame-Options': 'ALLOWALL',
-            'Content-Security-Policy': "frame-ancestors 'self'",
-          },
-        });
+        
+        let content = fileBuffer.toString('utf-8');
+
+        // Rewrite links in index.html to load locally via preview API (only when completed)
+        if (job.status === 'completed') {
+          const cleanHostname = job.hostname.toLowerCase().replace('www.', '');
+          const domainRegex = new RegExp(`(?:https?:)?//(?:www\\.)?${escapeRegExp(cleanHostname)}\\/?`, 'gi');
+          content = content.replace(domainRegex, `/api/mirror/${id}/preview/`);
+        }
+
+        // Inject script to override IntersectionObserver for lazy-loading compatibility
+        const observerOverrideScript = `
+          <script>
+            (function() {
+              if (window.IntersectionObserver) {
+                const OriginalObserver = window.IntersectionObserver;
+                window.IntersectionObserver = class extends OriginalObserver {
+                  constructor(callback, options) {
+                    super(callback, options);
+                    this._callback = callback;
+                  }
+                  observe(target) {
+                    super.observe(target);
+                    setTimeout(() => {
+                      try {
+                        this._callback([{
+                          target: target,
+                          isIntersecting: true,
+                          intersectionRatio: 1,
+                          boundingClientRect: target.getBoundingClientRect(),
+                          intersectionRect: target.getBoundingClientRect(),
+                          rootBounds: {},
+                          time: Date.now()
+                        }], this);
+                      } catch (e) {}
+                    }, 50);
+                  }
+                };
+              }
+            })();
+          </script>
+        `;
+        content = content.replace(/<head>/i, `<head>${observerOverrideScript}`);
+        content = content.replace(/loading=["']lazy["']/gi, 'loading="eager"');
+
+        fileBuffer = Buffer.from(content, 'utf-8');
+
+        const headers: Record<string, string> = {
+          'Content-Type': mimeType,
+          'Content-Length': fileBuffer.length.toString(),
+          'X-Frame-Options': 'ALLOWALL',
+          'Content-Security-Policy': "frame-ancestors 'self'",
+        };
+
+        if (job.status === 'downloading') {
+          headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+        } else {
+          headers['Cache-Control'] = 'public, max-age=3600, must-revalidate';
+        }
+
+        return new Response(fileBuffer, { headers });
       }
       return new Response('Directory listing forbidden', { status: 403 });
     }
 
-    // Read the file and serve it with correct content-type
-    const fileBuffer = fs.readFileSync(filePath);
+    // Serve the file with correct content-type
+    let fileBuffer = fs.readFileSync(filePath);
     const mimeType = mime.lookup(filePath) || 'application/octet-stream';
 
-    return new Response(fileBuffer, {
-      headers: {
-        'Content-Type': mimeType,
-        'Content-Length': stat.size.toString(),
-        'X-Frame-Options': 'ALLOWALL',
-        'Content-Security-Policy': "frame-ancestors 'self'",
-      },
-    });
+    // Intercept and rewrite absolute links in HTML or CSS to point to local preview API (only when completed)
+    if (mimeType.startsWith('text/html') || mimeType.startsWith('text/css')) {
+      let content = fileBuffer.toString('utf-8');
+      
+      if (job.status === 'completed') {
+        const cleanHostname = job.hostname.toLowerCase().replace('www.', '');
+        const domainRegex = new RegExp(`(?:https?:)?//(?:www\\.)?${escapeRegExp(cleanHostname)}\\/?`, 'gi');
+        content = content.replace(domainRegex, `/api/mirror/${id}/preview/`);
+      }
+
+      if (mimeType.startsWith('text/html')) {
+        // Inject script to override IntersectionObserver for lazy-loading compatibility
+        const observerOverrideScript = `
+          <script>
+            (function() {
+              if (window.IntersectionObserver) {
+                const OriginalObserver = window.IntersectionObserver;
+                window.IntersectionObserver = class extends OriginalObserver {
+                  constructor(callback, options) {
+                    super(callback, options);
+                    this._callback = callback;
+                  }
+                  observe(target) {
+                    super.observe(target);
+                    setTimeout(() => {
+                      try {
+                        this._callback([{
+                          target: target,
+                          isIntersecting: true,
+                          intersectionRatio: 1,
+                          boundingClientRect: target.getBoundingClientRect(),
+                          intersectionRect: target.getBoundingClientRect(),
+                          rootBounds: {},
+                          time: Date.now()
+                        }], this);
+                      } catch (e) {}
+                    }, 50);
+                  }
+                };
+              }
+            })();
+          </script>
+        `;
+        content = content.replace(/<head>/i, `<head>${observerOverrideScript}`);
+        content = content.replace(/loading=["']lazy["']/gi, 'loading="eager"');
+      }
+
+      fileBuffer = Buffer.from(content, 'utf-8');
+    }
+
+    // Check if download is requested (for individual asset download)
+    const download = req.nextUrl.searchParams.get('download');
+    const headers: Record<string, string> = {
+      'Content-Type': mimeType,
+      'Content-Length': fileBuffer.length.toString(),
+      'X-Frame-Options': 'ALLOWALL',
+      'Content-Security-Policy': "frame-ancestors 'self'",
+    };
+
+    if (download === 'true') {
+      headers['Content-Disposition'] = `attachment; filename="${path.basename(filePath)}"`;
+      headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+    } else if (job.status === 'downloading') {
+      headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+    } else {
+      headers['Cache-Control'] = 'public, max-age=3600, must-revalidate';
+    }
+
+    if (download === 'true') {
+      headers['Content-Disposition'] = `attachment; filename="${path.basename(filePath)}"`;
+    }
+
+    return new Response(fileBuffer, { headers });
   } catch (err: any) {
     return new Response(err.message || 'Internal server error', { status: 500 });
   }
+}
+
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

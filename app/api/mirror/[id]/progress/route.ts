@@ -2,8 +2,8 @@ import { NextRequest } from 'next/server';
 import path from 'path';
 import fs from 'fs';
 import { activeJobs } from '@/lib/jobStore';
+import { resolveTargetDir } from '@/lib/resolveDir';
 
-// Dynamic route parameters are promises in Next.js 15+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -64,7 +64,6 @@ export async function GET(
         )
       );
     } catch {
-      // Stream is probably closed
       clearInterval(interval);
       writer.close();
       return;
@@ -95,35 +94,8 @@ export async function GET(
 }
 
 function scanFolderStats(id: string, hostname: string) {
+  const targetDir = resolveTargetDir(id, hostname);
   const baseDir = path.join(process.cwd(), 'tmp', 'downloads', id);
-  let targetDir = path.join(baseDir, hostname);
-  if (!fs.existsSync(targetDir)) {
-    if (hostname.startsWith('www.')) {
-      const noWww = path.join(baseDir, hostname.substring(4));
-      if (fs.existsSync(noWww)) targetDir = noWww;
-    } else {
-      const withWww = path.join(baseDir, 'www.' + hostname);
-      if (fs.existsSync(withWww)) targetDir = withWww;
-    }
-  }
-
-  if (!fs.existsSync(targetDir)) {
-    try {
-      const subdirs = fs.readdirSync(baseDir).filter(f => {
-        const p = path.join(baseDir, f);
-        return fs.statSync(p).isDirectory() && !f.startsWith('.');
-      });
-      const indexMatch = subdirs.find(d => fs.existsSync(path.join(baseDir, d, 'index.html')));
-      if (indexMatch) {
-        targetDir = path.join(baseDir, indexMatch);
-      } else if (subdirs.length > 0) {
-        const primaryDir = subdirs.find(d => !d.includes('cdn') && !d.includes('google') && !d.includes('cloudflare'));
-        if (primaryDir) {
-          targetDir = path.join(baseDir, primaryDir);
-        }
-      }
-    } catch {}
-  }
 
   const stats = {
     html: 0,
@@ -147,7 +119,7 @@ function scanFolderStats(id: string, hostname: string) {
       const files = fs.readdirSync(dir);
       for (const file of files) {
         const fullPath = path.join(dir, file);
-        if (file.startsWith('.')) continue; // skip hidden files
+        if (file.startsWith('.')) continue;
 
         const stat = fs.statSync(fullPath);
         if (stat.isDirectory()) {
@@ -182,10 +154,8 @@ function scanFolderStats(id: string, hostname: string) {
 
   walk(dirToScan);
 
-  // Sort by modification time descending to get the newest files first
   recentFiles.sort((a, b) => b.mtime - a.mtime);
 
-  // Format to top 15 files
   const latestFiles = recentFiles.slice(0, 15).map(f => ({
     name: f.name,
     size: f.size,

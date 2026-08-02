@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
+import { resolveTargetDir, ensureJobExists } from '@/lib/resolveDir';
 import { activeJobs } from '@/lib/jobStore';
 
 interface FileNode {
@@ -17,49 +18,33 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const job = activeJobs.get(id);
 
-    if (!job) {
+    if (!ensureJobExists(id)) {
       return NextResponse.json({ error: 'Job not found' }, { status: 404 });
     }
 
-    const baseDir = path.join(process.cwd(), 'tmp', 'downloads', id);
-    let targetDir = path.join(baseDir, job.hostname);
-    if (!fs.existsSync(targetDir)) {
-      if (job.hostname.startsWith('www.')) {
-        const noWww = path.join(baseDir, job.hostname.substring(4));
-        if (fs.existsSync(noWww)) targetDir = noWww;
-      } else {
-        const withWww = path.join(baseDir, 'www.' + job.hostname);
-        if (fs.existsSync(withWww)) targetDir = withWww;
+    const job = activeJobs.get(id)!;
+
+    // Caching layer: return immediately if completed or cached within last 4 seconds
+    const now = Date.now();
+    if (job.cachedFileTree) {
+      if (job.status === 'completed' || (now - (job.lastFilesUpdate || 0) < 4000)) {
+        return NextResponse.json(job.cachedFileTree);
       }
     }
 
+    const targetDir = resolveTargetDir(id, job.hostname);
+
     if (!fs.existsSync(targetDir)) {
-      try {
-        const subdirs = fs.readdirSync(baseDir).filter(f => {
-          const p = path.join(baseDir, f);
-          return fs.statSync(p).isDirectory() && !f.startsWith('.');
-        });
-        const indexMatch = subdirs.find(d => fs.existsSync(path.join(baseDir, d, 'index.html')));
-        if (indexMatch) {
-          targetDir = path.join(baseDir, indexMatch);
-        } else if (subdirs.length > 0) {
-          const primaryDir = subdirs.find(d => !d.includes('cdn') && !d.includes('google') && !d.includes('cloudflare'));
-          if (primaryDir) {
-            targetDir = path.join(baseDir, primaryDir);
-          }
-        }
-      } catch {}
+      return NextResponse.json([]);
     }
 
-    if (!fs.existsSync(baseDir)) {
-      return NextResponse.json({ error: 'Download directory not found' }, { status: 404 });
-    }
+    const fileTree = buildFileTree(targetDir, targetDir);
 
-    const dirToScan = fs.existsSync(targetDir) ? targetDir : baseDir;
+    // Save cache
+    job.cachedFileTree = fileTree;
+    job.lastFilesUpdate = now;
 
-    const fileTree = buildFileTree(dirToScan, dirToScan);
     return NextResponse.json(fileTree);
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
@@ -71,7 +56,7 @@ function buildFileTree(dir: string, baseDir: string): FileNode[] {
   try {
     const list = fs.readdirSync(dir);
     for (const item of list) {
-      if (item.startsWith('.')) continue; // Skip hidden/dot files
+      if (item.startsWith('.')) continue;
 
       const fullPath = path.join(dir, item);
       const stat = fs.statSync(fullPath);
@@ -95,7 +80,6 @@ function buildFileTree(dir: string, baseDir: string): FileNode[] {
     }
   } catch {}
 
-  // Sort: Folders first alphabetically, then Files alphabetically
   return result.sort((a, b) => {
     if (a.type !== b.type) {
       return a.type === 'directory' ? -1 : 1;
@@ -105,9 +89,9 @@ function buildFileTree(dir: string, baseDir: string): FileNode[] {
 }
 
 function formatBytes(bytes: number) {
-  if (bytes === 0) return '0 Bytes';
+  if (bytes === 0) return '0 B';
   const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }

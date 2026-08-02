@@ -19,7 +19,8 @@ import {
   Terminal,
   Sparkles,
   Check,
-  Cpu,
+  RefreshCw,
+  Image,
 } from 'lucide-react';
 
 interface FileNode {
@@ -102,6 +103,26 @@ export default function MirrorDashboard() {
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
   const [crawlLogs, setCrawlLogs] = useState<string>('');
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [assets, setAssets] = useState<{ colors: string[]; images: Array<{ name: string; path: string; previewUrl: string; size: string }> } | null>(null);
+  const [loadingAssets, setLoadingAssets] = useState(false);
+  const [copiedColor, setCopiedColor] = useState<string | null>(null);
+  const [isAssetsDrawerOpen, setIsAssetsDrawerOpen] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+
+  const fetchAssets = async () => {
+    setLoadingAssets(true);
+    try {
+      const res = await fetch(`/api/mirror/${id}/assets`);
+      if (res.ok) {
+        const data = await res.json();
+        setAssets(data);
+      }
+    } catch (err) {
+      console.error('Failed to load assets', err);
+    } finally {
+      setLoadingAssets(false);
+    }
+  };
 
   const fetchLogs = async () => {
     setLoadingLogs(true);
@@ -121,6 +142,7 @@ export default function MirrorDashboard() {
   };
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const logsContainerRef = useRef<HTMLDivElement>(null);
 
   // Poll progress and establish EventSource SSE
   useEffect(() => {
@@ -186,6 +208,87 @@ export default function MirrorDashboard() {
 
     return () => clearInterval(interval);
   }, [status]);
+
+  // Poll assets periodically during download phase to show live previews in dashboard cards
+  useEffect(() => {
+    if (!id) return;
+    
+    const loadAssets = async () => {
+      try {
+        const res = await fetch(`/api/mirror/${id}/assets`);
+        if (res.ok) {
+          const data = await res.json();
+          setAssets(data);
+        }
+      } catch {}
+    };
+
+    loadAssets(); // Fetch once immediately
+    
+    let timer: NodeJS.Timeout;
+    if (status === 'downloading') {
+      timer = setInterval(loadAssets, 4000);
+    } else if (isAssetsDrawerOpen) {
+      timer = setInterval(loadAssets, 5000);
+    }
+
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [id, status, isAssetsDrawerOpen]);
+
+  // Poll files dynamically when drawer is open
+  useEffect(() => {
+    if (!id) return;
+    
+    let timer: NodeJS.Timeout;
+    
+    const loadFiles = async () => {
+      try {
+        const res = await fetch(`/api/mirror/${id}/files`);
+        if (res.ok) {
+          const data = await res.json();
+          setFileTree(data);
+        }
+      } catch {}
+    };
+
+    if (isFilesDrawerOpen) {
+      loadFiles();
+      if (status === 'downloading') {
+        timer = setInterval(loadFiles, 3000);
+      }
+    }
+
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [isFilesDrawerOpen, id, status]);
+
+  // Poll logs periodically when logs dialog is open and status is downloading
+  useEffect(() => {
+    if (!id) return;
+    
+    let timer: NodeJS.Timeout;
+    
+    if (isDiagnosticsOpen) {
+      fetchLogs(); // Initial fetch
+      if (status === 'downloading') {
+        timer = setInterval(fetchLogs, 2000);
+      }
+    }
+
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [isDiagnosticsOpen, id, status]);
+
+  // Auto-scroll diagnostics logs to the bottom on update
+  useEffect(() => {
+    if (isDiagnosticsOpen && logsContainerRef.current) {
+      logsContainerRef.current.scrollTop = logsContainerRef.current.scrollHeight;
+    }
+  }, [crawlLogs, isDiagnosticsOpen]);
 
   // Extract previewable HTML pages from file tree
   useEffect(() => {
@@ -312,6 +415,8 @@ export default function MirrorDashboard() {
         const files = await filesRes.json();
         setFileTree(files);
       }
+
+      await fetchAssets();
     } catch (err) {
       console.error('Failed to load finished job details', err);
     } finally {
@@ -340,6 +445,10 @@ export default function MirrorDashboard() {
               const ext = node.name.split('.').pop()?.toLowerCase();
               if (ext === 'html' || ext === 'htm') {
                 setPreviewPath(node.path);
+              } else if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext || '')) {
+                setLightboxImage(`/api/mirror/${id}/preview/${node.path}`);
+              } else {
+                window.open(`/api/mirror/${id}/preview/${node.path}`, '_blank');
               }
             }
           }}
@@ -393,14 +502,14 @@ export default function MirrorDashboard() {
         </div>
         <div className="space-y-2">
           <h2 className="text-xl font-semibold text-white">Mirroring Failed</h2>
-          <p className="text-sm text-neutral-450 max-w-sm mx-auto">
+          <p className="text-sm text-neutral-400 max-w-sm mx-auto">
             {error || 'An unknown error occurred during website mirroring.'}
           </p>
         </div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.push('/')}
-            className="h-10 px-5 rounded-lg bg-neutral-900 border border-neutral-850 hover:bg-neutral-850 text-sm text-white font-medium transition-colors cursor-pointer"
+            className="h-10 px-5 rounded-lg bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 text-sm text-white font-medium transition-colors cursor-pointer"
           >
             Go Back Home
           </button>
@@ -409,7 +518,7 @@ export default function MirrorDashboard() {
               fetchLogs();
               setIsDiagnosticsOpen(true);
             }}
-            className="h-10 px-5 rounded-lg bg-neutral-900 border border-neutral-850 hover:bg-neutral-850 text-sm text-neutral-400 hover:text-white font-medium transition-colors flex items-center gap-1.5 cursor-pointer"
+            className="h-10 px-5 rounded-lg bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 text-sm text-neutral-400 hover:text-white font-medium transition-colors flex items-center gap-1.5 cursor-pointer"
           >
             <Terminal className="w-4 h-4" />
             View Crawl Logs
@@ -433,58 +542,24 @@ export default function MirrorDashboard() {
               <ArrowLeft className="w-4 h-4" />
             </button>
             <div className="flex items-center gap-2.5">
-              <Globe className="w-4.5 h-4.5 text-neutral-450" />
+              <Globe className="w-4.5 h-4.5 text-neutral-400" />
               <h1 className="font-semibold text-sm text-white truncate max-w-[150px] sm:max-w-xs md:max-w-sm">
                 {jobHostname || overviewData?.hostname || 'mirrored-site'}
               </h1>
               {status === 'downloading' ? (
                 <span className="text-[10px] bg-emerald-950/40 text-emerald-400 border border-emerald-900/60 px-2.5 py-0.5 rounded-full font-mono font-bold flex items-center gap-1.5 animate-pulse shrink-0">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-505" />
-                  Mirroring {loadingProgress}%
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  Mirroring
                 </span>
-              ) : overviewData ? (
-                <span className="text-[10px] bg-neutral-900 text-neutral-450 border border-neutral-850 px-2 py-0.5 rounded-full font-mono font-medium shrink-0">
+              ) : overviewData?.techStack ? (
+                <span className="text-[10px] bg-neutral-900 text-neutral-400 border border-neutral-800 px-2 py-0.5 rounded-full font-mono font-medium shrink-0">
                   {overviewData.techStack}
                 </span>
               ) : null}
             </div>
           </div>
 
-          {/* Viewport Selectors and Download Actions */}
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1 bg-neutral-950 border border-neutral-900 rounded-xl p-1 text-xs">
-              <button
-                onClick={() => setViewport('desktop')}
-                title="Laptop 15\"
-                className={`p-2 rounded-lg flex items-center gap-1.5 transition-colors ${
-                  viewport === 'desktop' ? 'bg-neutral-900 text-white font-medium' : 'text-neutral-400 hover:text-neutral-200'
-                }`}
-              >
-                <Monitor className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">15" Screen</span>
-              </button>
-              <button
-                onClick={() => setViewport('tablet')}
-                title="Tablet 10\"
-                className={`p-2 rounded-lg flex items-center gap-1.5 transition-colors ${
-                  viewport === 'tablet' ? 'bg-neutral-900 text-white font-medium' : 'text-neutral-400 hover:text-neutral-200'
-                }`}
-              >
-                <Tablet className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">10" Tablet</span>
-              </button>
-              <button
-                onClick={() => setViewport('phone')}
-                title="Mobile 6\"
-                className={`p-2 rounded-lg flex items-center gap-1.5 transition-colors ${
-                  viewport === 'phone' ? 'bg-neutral-900 text-white font-medium' : 'text-neutral-400 hover:text-neutral-200'
-                }`}
-              >
-                <Smartphone className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">6" Phone</span>
-              </button>
-            </div>
-
             <a
               href="https://github.com/krishsoni15/WebHarvest"
               target="_blank"
@@ -509,13 +584,23 @@ export default function MirrorDashboard() {
               </span>
             </a>
 
-            <button
-              onClick={handleDownloadZip}
-              className="bg-white text-black text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg transition-all duration-300 flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] cursor-pointer hover:bg-neutral-100"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Download ZIP
-            </button>
+            {status === 'downloading' ? (
+              <button
+                disabled
+                className="bg-neutral-950 border border-neutral-900 text-neutral-500 text-xs font-semibold px-4 py-2.5 rounded-xl flex items-center gap-2 select-none opacity-50 cursor-not-allowed"
+              >
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-500" />
+                Download ZIP
+              </button>
+            ) : (
+              <button
+                onClick={handleDownloadZip}
+                className="bg-white text-black text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg transition-all duration-300 flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] cursor-pointer hover:bg-neutral-100"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Download ZIP
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -535,7 +620,7 @@ export default function MirrorDashboard() {
               {/* Address Control Deck */}
               <div className="w-full max-w-4xl mx-auto mb-5 glass border border-neutral-900/60 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md">
                 {/* Localhost Address Indicator */}
-                <div className="flex-1 w-full bg-neutral-950 border border-neutral-900 rounded-lg px-3 py-1.5 flex items-center gap-2 text-[10px] text-neutral-450 font-mono overflow-hidden">
+                <div className="flex-1 w-full bg-neutral-950 border border-neutral-900 rounded-lg px-3 py-1.5 flex items-center gap-2 text-[10px] text-neutral-400 font-mono overflow-hidden">
                   <Globe className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
                   <span className="text-emerald-500/70 select-none">http://localhost:3000</span>
                   <span className="text-neutral-500 select-none">/api/mirror/{id}/preview/</span>
@@ -543,6 +628,36 @@ export default function MirrorDashboard() {
                 </div>
 
                 <div className="flex items-center gap-1.5 shrink-0">
+                  {/* Viewport Selectors (just icons) */}
+                  <div className="flex items-center gap-0.5 bg-neutral-950 border border-neutral-900 rounded-lg p-0.5 text-xs mr-0.5">
+                    <button
+                      onClick={() => setViewport('desktop')}
+                      title="Laptop 15\"
+                      className={`p-1.5 rounded-md flex items-center justify-center transition-colors cursor-pointer ${
+                        viewport === 'desktop' ? 'bg-neutral-900 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
+                      }`}
+                    >
+                      <Monitor className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setViewport('tablet')}
+                      title="Tablet 10\"
+                      className={`p-1.5 rounded-md flex items-center justify-center transition-colors cursor-pointer ${
+                        viewport === 'tablet' ? 'bg-neutral-900 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
+                      }`}
+                    >
+                      <Tablet className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setViewport('phone')}
+                      title="Mobile 6\"
+                      className={`p-1.5 rounded-md flex items-center justify-center transition-colors cursor-pointer ${
+                        viewport === 'phone' ? 'bg-neutral-900 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
+                      }`}
+                    >
+                      <Smartphone className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                   {/* Reload preview */}
                   <button
                     onClick={() => {
@@ -552,14 +667,14 @@ export default function MirrorDashboard() {
                     title="Reload Preview"
                     className="p-2 rounded-lg bg-neutral-950 hover:bg-neutral-900 border border-neutral-900 text-neutral-400 hover:text-white transition-colors cursor-pointer"
                   >
-                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                    <RefreshCw className="w-3.5 h-3.5" />
                   </button>
 
                   {/* Open page directly in localhost new tab */}
                   <button
                     onClick={() => window.open(`/api/mirror/${id}/preview/${previewPath}`, '_blank')}
                     title="Open page in new browser tab"
-                    className="p-2 rounded-lg bg-neutral-955 hover:bg-neutral-900 border border-neutral-900 text-neutral-400 hover:text-white transition-colors flex items-center gap-1 text-xs cursor-pointer font-medium"
+                    className="p-2 rounded-lg bg-neutral-950 hover:bg-neutral-900 border border-neutral-900 text-neutral-400 hover:text-white transition-colors flex items-center gap-1 text-xs cursor-pointer font-medium"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">Open in Tab</span>
@@ -597,7 +712,7 @@ export default function MirrorDashboard() {
                               <div className="relative flex items-center justify-center">
                                 <div className="absolute w-24 h-24 rounded-full border border-dashed border-emerald-500/20 animate-spin [animation-duration:20s]" />
                                 <div className="w-16 h-16 rounded-full bg-emerald-950/20 border border-emerald-900/60 flex items-center justify-center animate-pulse">
-                                  <Globe className="w-8 h-8 text-emerald-450" />
+                                  <Globe className="w-8 h-8 text-emerald-400" />
                                 </div>
                               </div>
                             </div>
@@ -628,7 +743,6 @@ export default function MirrorDashboard() {
                             src={`/api/mirror/${id}/preview/${previewPath}`}
                             onLoad={handleIframeLoad}
                             className="w-full h-full bg-white border-0"
-                            sandbox="allow-scripts allow-same-origin"
                           />
                         )}
                       </div>
@@ -652,7 +766,7 @@ export default function MirrorDashboard() {
                           <div className="relative flex items-center justify-center">
                             <div className="absolute w-20 h-20 rounded-full border border-dashed border-emerald-500/20 animate-spin [animation-duration:20s]" />
                             <div className="w-12 h-12 rounded-full bg-emerald-950/20 border border-emerald-900/60 flex items-center justify-center animate-pulse">
-                              <Globe className="w-6 h-6 text-emerald-450" />
+                              <Globe className="w-6 h-6 text-emerald-400" />
                             </div>
                           </div>
                         </div>
@@ -677,7 +791,6 @@ export default function MirrorDashboard() {
                         src={`/api/mirror/${id}/preview/${previewPath}`}
                         onLoad={handleIframeLoad}
                         className="w-full h-full bg-white border-0"
-                        sandbox="allow-scripts allow-same-origin"
                       />
                     )}
                   </div>
@@ -696,7 +809,7 @@ export default function MirrorDashboard() {
                           <div className="relative flex items-center justify-center">
                             <div className="absolute w-16 h-16 rounded-full border border-dashed border-emerald-500/20 animate-spin [animation-duration:20s]" />
                             <div className="w-10 h-10 rounded-full bg-emerald-950/20 border border-emerald-900/60 flex items-center justify-center animate-pulse">
-                              <Globe className="w-5 h-5 text-emerald-450" />
+                              <Globe className="w-5 h-5 text-emerald-400" />
                             </div>
                           </div>
                         </div>
@@ -721,7 +834,6 @@ export default function MirrorDashboard() {
                         src={`/api/mirror/${id}/preview/${previewPath}`}
                         onLoad={handleIframeLoad}
                         className="w-full h-full bg-white border-0"
-                        sandbox="allow-scripts allow-same-origin"
                       />
                     )}
                   </div>
@@ -729,16 +841,18 @@ export default function MirrorDashboard() {
               </div>
             </div>
 
-            {/* Right: Sidebar Overview & File System Trigger Card */}
+            {/* Right: Sidebar Project Dashboard */}
             <div className="w-full lg:w-[28%] space-y-6 shrink-0">
               {/* Site Details Card */}
-              <div className="glass rounded-2xl p-5 border border-neutral-900 space-y-4 shadow-xl">
+              <div className="glass rounded-2xl p-5 border border-neutral-900 space-y-4.5 shadow-xl">
                 <div>
-                  <h3 className="text-xs font-bold text-neutral-450 uppercase tracking-widest font-mono mb-2">
-                    Site Overview
+                  <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-widest font-mono mb-2.5">
+                    Project Dashboard
                   </h3>
-                  <div className="bg-neutral-950 border border-neutral-900 p-3 rounded-xl flex items-center justify-between gap-3">
-                    <div className="truncate pr-1">
+                  
+                  {/* Address & Meta card */}
+                  <div className="bg-neutral-950 border border-neutral-900 p-3.5 rounded-xl space-y-3">
+                    <div>
                       <p className="text-[10px] text-neutral-500 font-mono uppercase tracking-wider">Source Address</p>
                       <a 
                         href={jobUrl || overviewData?.url || '#'}
@@ -750,83 +864,415 @@ export default function MirrorDashboard() {
                         <ExternalLink className="w-3 h-3 text-neutral-500 shrink-0" />
                       </a>
                     </div>
-                  </div>
-                </div>
+                    
+                    <div className="pt-2.5 border-t border-neutral-900 grid grid-cols-2 gap-2 text-[10px] font-mono leading-none">
+                      <div>
+                        <span className="text-neutral-500 block uppercase tracking-wider text-[8px] mb-1">Total Size</span>
+                        <span className="text-white font-bold text-xs">{overviewData?.stats.size ?? formatBytes(stats.totalSize)}</span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500 block uppercase tracking-wider text-[8px] mb-1">Files Captured</span>
+                        <span className="text-white font-bold text-xs">
+                          {stats.totalFiles || fileTree.length || (stats.html + stats.css + stats.images + stats.fonts + stats.js)}
+                        </span>
+                      </div>
+                    </div>
 
-                {/* Tech stack & stats */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-neutral-950/60 border border-neutral-900 p-3 rounded-xl">
-                    <span className="text-[10px] text-neutral-500 font-mono uppercase tracking-wider block">Pages</span>
-                    <span className="text-lg font-bold text-white font-mono mt-0.5 block">
-                      {overviewData?.stats.pages ?? stats.html}
-                    </span>
-                  </div>
-                  <div className="bg-neutral-950/60 border border-neutral-900 p-3 rounded-xl">
-                    <span className="text-[10px] text-neutral-500 font-mono uppercase tracking-wider block">Images</span>
-                    <span className="text-lg font-bold text-white font-mono mt-0.5 block">
-                      {overviewData?.stats.images ?? stats.images}
-                    </span>
-                  </div>
-                  <div className="bg-neutral-950/60 border border-neutral-900 p-3 rounded-xl col-span-2 flex justify-between items-center">
-                    <div>
-                      <span className="text-[10px] text-neutral-500 font-mono uppercase tracking-wider block">Download Size</span>
-                      <span className="text-sm font-bold text-white font-mono mt-0.5 block">
-                        {overviewData?.stats.size ?? formatBytes(stats.totalSize)}
+                    <div className="pt-2.5 border-t border-neutral-900 flex justify-between items-center text-[10px] font-mono leading-none">
+                      <span className="text-neutral-500 uppercase tracking-wider text-[8px]">Technology</span>
+                      <span className="text-white font-bold bg-neutral-900 border border-neutral-800 px-2 py-0.5 rounded text-[8px]">
+                        {overviewData?.techStack || (status === 'downloading' ? 'Detecting…' : 'Static Site')}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <button 
-                        onClick={() => {
-                          fetchLogs();
-                          setIsDiagnosticsOpen(true);
-                        }}
-                        className="p-2 bg-white/5 hover:bg-white/10 border border-neutral-800 text-neutral-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-                        title="View crawl logs / diagnostics"
-                      >
-                        <Terminal className="w-4 h-4" />
-                      </button>
-                      <button 
-                        onClick={handleDownloadZip}
-                        className="p-2 bg-white/5 hover:bg-white/10 border border-neutral-800 text-white rounded-lg transition-colors cursor-pointer"
-                        title="Download archive immediately"
-                      >
-                        <Download className="w-4 h-4" />
-                      </button>
-                    </div>
+
+                    {assets?.colors && assets.colors.length > 0 && (
+                      <div className="pt-2 border-t border-neutral-900 flex items-center justify-between">
+                        <span className="text-[8px] text-neutral-500 font-mono uppercase tracking-wider">Colors</span>
+                        <div className="flex items-center gap-1">
+                          {assets.colors.slice(0, 5).map((color) => (
+                            <div 
+                              key={color}
+                              className="w-3.5 h-3.5 rounded-full border border-neutral-900 shadow-sm shrink-0"
+                              style={{ backgroundColor: color }}
+                              title={color}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
-              </div>
 
-              {/* Collapsible File Explorer Trigger Card */}
-              <div className="glass rounded-2xl border border-neutral-900 p-5 shadow-xl space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-xs font-bold text-neutral-450 uppercase tracking-widest font-mono">
-                      File Structure
-                    </h3>
-                    <p className="text-[11px] text-neutral-500 mt-1 font-mono">
-                      {stats.totalFiles || fileTree.length} static files ready
-                    </p>
-                  </div>
-                  <button 
+                {/* Interactive Deck (Pages & Assets) */}
+                <div className="grid grid-cols-2 gap-3">
+                  <button
                     onClick={() => setIsFilesDrawerOpen(true)}
-                    className="p-2 bg-neutral-900 hover:bg-neutral-850 border border-neutral-800 text-white rounded-lg transition-colors cursor-pointer flex items-center justify-center"
-                    title="Browse all directories and assets"
+                    className="bg-neutral-950/60 border border-neutral-900 p-3.5 rounded-xl hover:border-neutral-800 hover:bg-neutral-900/40 transition-all text-left w-full group cursor-pointer flex flex-col justify-between min-h-[115px] relative overflow-hidden"
                   >
-                    <Folder className="w-4.5 h-4.5" />
+                    <div>
+                      <span className="text-[10px] text-neutral-500 font-mono uppercase tracking-wider block group-hover:text-neutral-400 transition-colors">Pages</span>
+                      <span className="text-2xl font-bold text-white font-mono mt-0.5 block">
+                        {overviewData?.stats.pages ?? stats.html}
+                      </span>
+                    </div>
+
+                    {recentFiles && recentFiles.length > 0 && (
+                      <div className="text-[7.5px] font-mono text-neutral-400 truncate w-full my-1 leading-none select-none">
+                        <span className="text-[6px] text-neutral-600 block uppercase tracking-wider mb-0.5">Last Captured</span>
+                        <span className="text-white truncate block">{recentFiles[0].name.split('/').pop()}</span>
+                      </div>
+                    )}
+
+                    <span className="text-[9px] text-neutral-500 group-hover:text-emerald-500 font-sans font-medium transition-colors mt-auto flex items-center justify-between w-full">
+                      Browse Files
+                      <span className="text-xs group-hover:translate-x-0.5 transition-transform">→</span>
+                    </span>
+                  </button>
+                  
+                  <button
+                    onClick={() => setIsAssetsDrawerOpen(true)}
+                    className="bg-neutral-950/60 border border-neutral-900 p-3.5 rounded-xl hover:border-neutral-800 hover:bg-neutral-900/40 transition-all text-left w-full group cursor-pointer flex flex-col justify-between min-h-[115px] relative overflow-hidden"
+                  >
+                    <div>
+                      <span className="text-[10px] text-neutral-500 font-mono uppercase tracking-wider block group-hover:text-neutral-400 transition-colors">Assets</span>
+                      <span className="text-2xl font-bold text-white font-mono mt-0.5 block">
+                        {overviewData?.stats.images ?? stats.images}
+                      </span>
+                    </div>
+
+                    {assets?.images && assets.images.length > 0 ? (
+                      <div className="flex items-center -space-x-1.5 overflow-hidden my-1">
+                        {assets.images.slice(0, 3).map((img, idx) => (
+                          <div 
+                            key={img.path}
+                            className="w-5.5 h-5.5 rounded-full border border-neutral-950 bg-neutral-900 overflow-hidden flex items-center justify-center shrink-0 transparency-pattern"
+                            style={{ zIndex: 10 - idx }}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img 
+                              src={img.previewUrl} 
+                              alt="" 
+                              className="w-full h-full object-cover" 
+                            />
+                          </div>
+                        ))}
+                        {assets.images.length > 3 && (
+                          <div className="w-5.5 h-5.5 rounded-full border border-neutral-950 bg-neutral-900 flex items-center justify-center text-[7px] font-bold text-neutral-400 font-mono shrink-0 select-none" style={{ zIndex: 0 }}>
+                            +{assets.images.length - 3}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="h-5.5" />
+                    )}
+
+                    <span className="text-[9px] text-neutral-500 group-hover:text-emerald-500 font-sans font-medium transition-colors mt-auto flex items-center justify-between w-full">
+                      Browse Assets
+                      <span className="text-xs group-hover:translate-x-0.5 transition-transform">→</span>
+                    </span>
                   </button>
                 </div>
-                <button
-                  onClick={() => setIsFilesDrawerOpen(true)}
-                  className="w-full py-2 bg-white text-black text-xs font-bold rounded-xl shadow hover:bg-neutral-100 transition-colors cursor-pointer"
-                >
-                  Browse File Tree
-                </button>
+
+                {/* Primary Action Buttons */}
+                <div className="space-y-2 pt-1">
+                  {status === 'downloading' ? (
+                    <button 
+                      onClick={handleDownloadZip}
+                      className="w-full py-2.5 bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/30 text-xs font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer animate-pulse"
+                      title="Download current progress ZIP"
+                    >
+                      <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                      Mirroring Site ({loadingProgress}%)
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={handleDownloadZip}
+                      className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold rounded-xl shadow-lg transition-all duration-300 flex items-center justify-center gap-1.5 hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
+                      title="Download archive immediately"
+                    >
+                      <Download className="w-4 h-4" />
+                      Download ZIP Archive
+                    </button>
+                  )}
+                  <button 
+                    onClick={() => {
+                      if (!isDiagnosticsOpen) fetchLogs();
+                      setIsDiagnosticsOpen(!isDiagnosticsOpen);
+                    }}
+                    className={`w-full py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 text-xs font-semibold ${
+                      isDiagnosticsOpen 
+                        ? 'bg-neutral-800 border border-neutral-700 text-white' 
+                        : 'bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-white'
+                    }`}
+                    title="Toggle inline system logs console"
+                  >
+                    <Terminal className="w-3.5 h-3.5 text-neutral-500" />
+                    {isDiagnosticsOpen ? 'Hide System Logs' : 'View System Logs'}
+                  </button>
+                </div>
+
+                {/* Collapsible Console Terminal (Inline) */}
+                {isDiagnosticsOpen && (
+                  <div className="bg-black/95 border border-neutral-900 rounded-xl p-3 font-mono text-[9px] leading-relaxed text-neutral-400 space-y-1.5 animate-fade-in mt-3 select-text">
+                    <div className="flex items-center justify-between text-[7px] text-neutral-600 uppercase tracking-widest pb-1.5 border-b border-neutral-900/60 font-bold select-none">
+                      <span className="flex items-center gap-1.5">
+                        <span className={`w-1.5 h-1.5 rounded-full bg-emerald-500 ${status === 'downloading' ? 'animate-ping' : ''}`} />
+                        System Logs Console
+                      </span>
+                      <button 
+                        onClick={() => setIsDiagnosticsOpen(false)}
+                        className="text-neutral-500 hover:text-white cursor-pointer text-[8px]"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div 
+                      ref={logsContainerRef}
+                      className="max-h-[250px] overflow-y-auto space-y-1 scrollbar-thin scroll-smooth pr-1"
+                    >
+                      {crawlLogs ? (
+                        crawlLogs.trim().split('\n').map((line, idx) => (
+                          <div key={idx} className="break-all font-mono leading-normal text-emerald-400/90">
+                            <span className="text-neutral-700 mr-1 select-none">$</span>
+                            {line}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-neutral-600 animate-pulse">Loading stream logs...</div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
         )}
       </main>
+
+      {/* Slide-over right drawer for design assets */}
+      {isAssetsDrawerOpen && (
+        <div className="fixed inset-0 z-[100] overflow-hidden">
+          {/* Backdrop blur overlay */}
+          <div 
+            onClick={() => setIsAssetsDrawerOpen(false)}
+            className="absolute inset-0 bg-black/60 backdrop-blur-xs transition-opacity duration-300 animate-fade-in" 
+          />
+
+          <div className="absolute inset-y-0 right-0 max-w-full flex pl-10">
+            <div className="w-screen max-w-md transform transition-transform duration-300 ease-out translate-x-0">
+              <div className="h-full flex flex-col bg-[#080808]/95 border-l border-neutral-900 shadow-2xl overflow-hidden glass">
+                {/* Drawer Header */}
+                <div className="px-5 py-4 border-b border-neutral-900/60 flex items-center justify-between bg-neutral-900/30 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4.5 h-4.5 text-emerald-400" />
+                    <h3 className="text-xs font-bold text-white uppercase font-mono tracking-widest">
+                      Design Assets
+                    </h3>
+                  </div>
+                  <button 
+                    onClick={() => setIsAssetsDrawerOpen(false)}
+                    className="p-1.5 rounded-lg hover:bg-neutral-900 text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                  >
+                    <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </div>
+
+                {/* Drawer Content */}
+                <div className="flex-1 overflow-y-auto p-5 space-y-6 scrollbar-thin">
+                  {loadingAssets ? (
+                    <div className="flex flex-col items-center justify-center py-20 space-y-3">
+                      <Loader2 className="w-6 h-6 animate-spin text-neutral-500" />
+                      <p className="text-[11px] text-neutral-500 font-mono">Analyzing mirrored design assets...</p>
+                    </div>
+                  ) : assets ? (
+                    <>
+                      {/* Color Palette */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider font-mono">Color Palette</h4>
+                          <span className="text-[9px] text-neutral-500 font-mono">Click to copy</span>
+                        </div>
+                        {assets.colors && assets.colors.length > 0 ? (
+                          <div className="grid grid-cols-4 gap-2.5 bg-neutral-950 border border-neutral-900/80 p-3.5 rounded-xl">
+                            {assets.colors.map((color) => {
+                              const isCopied = copiedColor === color;
+                              return (
+                                <button
+                                  key={color}
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(color);
+                                    setCopiedColor(color);
+                                    setTimeout(() => setCopiedColor(null), 1500);
+                                  }}
+                                  className="flex flex-col items-center justify-center gap-1.5 focus:outline-none group cursor-pointer"
+                                  title={`Copy ${color}`}
+                                >
+                                  <div 
+                                    className="w-10 h-10 rounded-lg border border-neutral-800 shadow-md group-hover:scale-105 active:scale-95 transition-all relative flex items-center justify-center overflow-hidden"
+                                    style={{ backgroundColor: color }}
+                                  >
+                                    {isCopied && (
+                                      <div className="absolute inset-0 bg-black/45 flex items-center justify-center animate-fade-in">
+                                        <Check className="w-4.5 h-4.5 text-white stroke-[3]" />
+                                      </div>
+                                    )}
+                                  </div>
+                                  <span className="text-[9px] text-neutral-400 font-mono select-all truncate max-w-full font-semibold">
+                                    {isCopied ? 'Copied' : color}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="bg-neutral-950 border border-neutral-900/80 p-4 rounded-xl text-center">
+                            <p className="text-xs text-neutral-500">No color palette detected.</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Assets Gallery */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider font-mono">Assets Gallery ({assets.images.length})</h4>
+                          <span className="text-[9px] text-neutral-500 font-mono">Click thumbnail to view</span>
+                        </div>
+                        {assets.images && assets.images.length > 0 ? (
+                          <div className="grid grid-cols-3 gap-2">
+                            {assets.images.map((img, idx) => {
+                              const isVideo = ['mp4', 'webm', 'ogg', 'mov'].includes(img.name.split('.').pop()?.toLowerCase() || '');
+                              return (
+                                <div 
+                                  key={img.path}
+                                  className="bg-neutral-950 border border-neutral-900 hover:border-neutral-800 rounded-xl p-2 flex flex-col gap-1.5 group transition-all relative"
+                                >
+                                  {/* Thumbnail */}
+                                  <div 
+                                    onClick={() => setLightboxImage(img.previewUrl)}
+                                    className="w-full aspect-square transparency-pattern border border-neutral-800 rounded-lg overflow-hidden flex items-center justify-center shrink-0 cursor-pointer hover:scale-[1.02] transition-all relative"
+                                    title={isVideo ? "Inspect video" : "Inspect image"}
+                                  >
+                                    {/* Image number badge */}
+                                    <span className="absolute top-1 left-1 bg-black/70 text-neutral-300 text-[7px] font-mono font-bold px-1.5 py-0.5 rounded z-10 select-none">
+                                      {idx + 1}/{assets.images.length}
+                                    </span>
+
+                                    {isVideo ? (
+                                      <video 
+                                        src={img.previewUrl} 
+                                        className="max-w-[95%] max-h-[95%] object-contain group-hover:scale-105 transition-transform duration-300 rounded"
+                                        muted
+                                        playsInline
+                                        loop
+                                        onMouseOver={(e) => (e.target as HTMLVideoElement).play().catch(() => {})}
+                                        onMouseOut={(e) => (e.target as HTMLVideoElement).pause()}
+                                      />
+                                    ) : (
+                                      /* eslint-disable-next-line @next/next/no-img-element */
+                                      <img 
+                                        src={img.previewUrl} 
+                                        alt="" 
+                                        className="max-w-[90%] max-h-[90%] object-contain group-hover:scale-110 transition-transform duration-300"
+                                      />
+                                    )}
+                                  </div>
+                                  <div className="min-w-0 pr-6">
+                                    <p className="text-[8px] text-neutral-300 truncate font-mono select-all font-medium leading-tight" title={img.name}>
+                                      {img.name}
+                                    </p>
+                                    <p className="text-[7px] text-neutral-500 font-mono mt-0.5 leading-none">{img.size}</p>
+                                  </div>
+                                  
+                                  {/* Download button - always visible */}
+                                  <a
+                                    href={`${img.previewUrl}?download=true`}
+                                    download
+                                    className="absolute top-2 right-2 p-1 text-neutral-400 hover:text-white rounded bg-neutral-900 border border-neutral-800 hover:border-neutral-700 transition-all cursor-pointer z-10"
+                                    title="Download asset"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <Download className="w-2.5 h-2.5" />
+                                  </a>
+                                  {/* Open in new tab - always visible */}
+                                  <button
+                                    onClick={() => window.open(img.previewUrl, '_blank')}
+                                    className="absolute bottom-2 right-2 p-1 text-neutral-400 hover:text-white rounded bg-neutral-900 border border-neutral-800 hover:border-neutral-700 transition-all cursor-pointer z-10"
+                                    title="Open in new tab"
+                                  >
+                                    <ExternalLink className="w-2.5 h-2.5" />
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="bg-neutral-950 border border-neutral-900/80 p-4 rounded-xl text-center">
+                            <p className="text-xs text-neutral-500">No images extracted.</p>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-center py-20 text-xs text-neutral-500">
+                      No assets metadata available.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Lightbox Modal */}
+      {lightboxImage && (
+        <div 
+          className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-xs flex flex-col items-center justify-center p-4 animate-fade-in"
+          onClick={() => setLightboxImage(null)}
+        >
+          {/* Close button */}
+          <button 
+            className="absolute top-4 right-4 text-white hover:text-neutral-300 text-2xl font-bold p-2 focus:outline-none cursor-pointer"
+            onClick={() => setLightboxImage(null)}
+          >
+            ✕
+          </button>
+          
+          <div 
+            className="relative max-w-5xl max-h-[85vh] w-full flex items-center justify-center p-2 rounded-2xl transparency-pattern border border-neutral-900"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/\.(mp4|webm|ogg|mov)(?:\?|$)/i.test(lightboxImage) ? (
+              <video 
+                src={lightboxImage} 
+                className="max-w-full max-h-[80vh] object-contain rounded-lg animate-scale-up"
+                controls
+                autoPlay
+              />
+            ) : (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img 
+                src={lightboxImage} 
+                alt="Preview" 
+                className="max-w-full max-h-[80vh] object-contain rounded-lg animate-scale-up"
+              />
+            )}
+          </div>
+
+          <div className="mt-4 flex items-center gap-4 text-xs text-neutral-400 font-mono">
+            <span>Click outside or press ✕ to close</span>
+            <span>|</span>
+            <a 
+              href={lightboxImage} 
+              target="_blank" 
+              rel="noreferrer"
+              className="text-emerald-400 hover:underline flex items-center gap-1"
+            >
+              Open in tab <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* Slide-over right drawer for files mapping */}
       {isFilesDrawerOpen && (
@@ -843,14 +1289,14 @@ export default function MirrorDashboard() {
                 {/* Drawer Header */}
                 <div className="px-5 py-4 border-b border-neutral-900/60 flex items-center justify-between bg-neutral-900/30 shrink-0">
                   <div className="flex items-center gap-2">
-                    <Folder className="w-4 h-4 text-neutral-450 fill-neutral-500/10" />
+                    <Folder className="w-4 h-4 text-neutral-400 fill-neutral-500/10" />
                     <h3 className="text-xs font-bold text-white uppercase font-mono tracking-widest">
                       File Explorer
                     </h3>
                   </div>
                   <button 
                     onClick={() => setIsFilesDrawerOpen(false)}
-                    className="p-1.5 rounded-lg hover:bg-neutral-900 text-neutral-450 hover:text-white transition-colors cursor-pointer"
+                    className="p-1.5 rounded-lg hover:bg-neutral-900 text-neutral-400 hover:text-white transition-colors cursor-pointer"
                   >
                     <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                   </button>
@@ -865,7 +1311,7 @@ export default function MirrorDashboard() {
                       ))}
                     </div>
                   ) : (
-                    <div className="text-center py-20 text-[11px] text-neutral-550 font-mono">
+                    <div className="text-center py-20 text-[11px] text-neutral-500 font-mono">
                       No files mapped.
                     </div>
                   )}
@@ -875,56 +1321,7 @@ export default function MirrorDashboard() {
           </div>
         </div>
       )}
-      {/* Diagnostics Logs Modal */}
-      {isDiagnosticsOpen && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-          {/* Backdrop */}
-          <div 
-            onClick={() => setIsDiagnosticsOpen(false)}
-            className="absolute inset-0 bg-black/80 backdrop-blur-xs animate-fade-in" 
-          />
 
-          <div className="relative w-full max-w-3xl bg-[#090909] border border-neutral-900 rounded-2xl shadow-2xl overflow-hidden glass flex flex-col h-[80vh] z-10">
-            {/* Header */}
-            <div className="px-5 py-4 border-b border-neutral-900/60 flex items-center justify-between bg-neutral-900/30 shrink-0">
-              <div className="flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-neutral-450" />
-                <h3 className="text-xs font-bold text-white uppercase font-mono tracking-widest">
-                  Crawler Diagnostics Log
-                </h3>
-              </div>
-              <button 
-                onClick={() => setIsDiagnosticsOpen(false)}
-                className="p-1.5 rounded-lg hover:bg-neutral-900 text-neutral-450 hover:text-white transition-colors cursor-pointer"
-              >
-                <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-
-            {/* Monospace Log Viewer */}
-            <div className="flex-1 p-5 overflow-y-auto font-mono text-[10px] leading-relaxed text-neutral-350 bg-black/60 select-text scrollbar-thin">
-              {loadingLogs ? (
-                <div className="h-full flex items-center justify-center gap-2 text-neutral-500 text-xs">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Loading logs...
-                </div>
-              ) : (
-                <pre className="whitespace-pre-wrap break-all">{crawlLogs}</pre>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="px-5 py-3 border-t border-neutral-900 bg-neutral-900/20 flex justify-end shrink-0">
-              <button
-                onClick={() => setIsDiagnosticsOpen(false)}
-                className="px-4 py-2 bg-neutral-900 hover:bg-neutral-850 border border-neutral-800 text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer"
-              >
-                Close Logs
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
