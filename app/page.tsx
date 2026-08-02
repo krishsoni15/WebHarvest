@@ -2,13 +2,18 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Globe, ArrowRight, Clock, Trash2, CheckCircle2 } from 'lucide-react';
+import { Globe, ArrowRight, Clock, Trash2, CheckCircle2, Layers, HardDrive, FileText, Image as ImageIcon } from 'lucide-react';
 
 interface RecentJob {
   id: string;
   url: string;
   hostname: string;
   addedAt: number;
+  techStack?: string;
+  size?: string;
+  pages?: number;
+  images?: number;
+  files?: number;
 }
 
 export default function Home() {
@@ -31,11 +36,36 @@ export default function Home() {
       })
       .catch(() => {});
 
-    // Load recent harvest history from localStorage
+    // Load recent harvest history from localStorage and fetch real overview stats
     try {
       const saved = localStorage.getItem('webharvest_recent_jobs');
       if (saved) {
-        setRecentJobs(JSON.parse(saved));
+        const parsed: RecentJob[] = JSON.parse(saved);
+        setRecentJobs(parsed);
+
+        // Fetch fresh metadata/overview for each recent job
+        parsed.forEach(async (job) => {
+          try {
+            const res = await fetch(`/api/mirror/${job.id}/overview`);
+            if (res.ok) {
+              const data = await res.json();
+              setRecentJobs((prev) =>
+                prev.map((j) =>
+                  j.id === job.id
+                    ? {
+                        ...j,
+                        techStack: data.techStack,
+                        size: data.stats?.size,
+                        pages: data.stats?.pages,
+                        images: data.stats?.images,
+                        files: data.stats?.files,
+                      }
+                    : j
+                )
+              );
+            }
+          } catch {}
+        });
       }
     } catch {}
   }, []);
@@ -132,7 +162,7 @@ export default function Home() {
       {/* Premium Top Radial Glow */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-gradient-to-b from-neutral-900/40 to-transparent rounded-full blur-3xl pointer-events-none" />
 
-      <main className="w-full max-w-xl flex flex-col items-center text-center space-y-8 z-10 my-auto">
+      <main className="w-full max-w-2xl flex flex-col items-center text-center space-y-8 z-10 my-auto">
         {/* Brand/Logo */}
         <div className="flex flex-col items-center space-y-3">
           <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-neutral-900 border border-neutral-800 shadow-inner">
@@ -185,7 +215,7 @@ export default function Home() {
 
         {/* Recent Harvests History Deck */}
         {recentJobs.length > 0 && (
-          <div className="w-full pt-6 space-y-3 border-t border-neutral-900/80 animate-fade-in">
+          <div className="w-full pt-6 space-y-3 border-t border-neutral-900/80 animate-fade-in text-left">
             <div className="flex items-center justify-between text-xs text-neutral-500 font-mono font-medium">
               <span className="flex items-center gap-1.5 text-neutral-400">
                 <Clock className="w-3.5 h-3.5 text-emerald-500" />
@@ -197,32 +227,65 @@ export default function Home() {
                 title="Clear local history"
               >
                 <Trash2 className="w-3 h-3" />
-                Clear
+                Clear History
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {recentJobs.map((job) => (
                 <a
                   key={job.id}
                   href={`/mirror/${job.id}`}
-                  className="bg-neutral-950/80 hover:bg-neutral-900/60 border border-neutral-900 hover:border-neutral-800 p-3 rounded-xl flex items-center justify-between text-left transition-all duration-200 group cursor-pointer shadow-md"
+                  className="bg-neutral-950/90 hover:bg-neutral-900/80 border border-neutral-900 hover:border-neutral-800 p-3.5 rounded-xl flex flex-col justify-between transition-all duration-200 group cursor-pointer shadow-lg hover:shadow-emerald-950/20"
                 >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-8 h-8 rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center text-emerald-400 font-bold font-mono text-xs shrink-0">
-                      {job.hostname.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">
-                        {job.hostname}
-                      </p>
-                      <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 font-mono mt-0.5">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
-                        <span>100% Captured</span>
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center text-emerald-400 font-bold font-mono text-xs shrink-0">
+                        {job.hostname.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">
+                          {job.hostname}
+                        </p>
+                        <div className="flex items-center gap-1.5 text-[9px] text-emerald-400 font-mono mt-0.5">
+                          <CheckCircle2 className="w-2.5 h-2.5 text-emerald-500 shrink-0" />
+                          <span>100% Captured</span>
+                        </div>
                       </div>
                     </div>
+                    <ArrowRight className="w-4 h-4 text-neutral-600 group-hover:text-white group-hover:translate-x-1 transition-all shrink-0 mt-1" />
                   </div>
-                  <ArrowRight className="w-3.5 h-3.5 text-neutral-600 group-hover:text-white group-hover:translate-x-1 transition-all shrink-0 ml-2" />
+
+                  {/* Real Stats & Technology Metadata Pill */}
+                  <div className="pt-2 border-t border-neutral-900/80 flex items-center justify-between text-[9.5px] font-mono text-neutral-400">
+                    <div className="flex items-center gap-2 text-neutral-400">
+                      {job.size && (
+                        <span className="flex items-center gap-1" title="Total Size">
+                          <HardDrive className="w-2.5 h-2.5 text-neutral-500" />
+                          {job.size}
+                        </span>
+                      )}
+                      {job.pages !== undefined && (
+                        <span className="flex items-center gap-1" title="Captured Pages">
+                          <FileText className="w-2.5 h-2.5 text-neutral-500" />
+                          {job.pages} pgs
+                        </span>
+                      )}
+                      {job.images !== undefined && (
+                        <span className="flex items-center gap-1" title="Assets">
+                          <ImageIcon className="w-2.5 h-2.5 text-neutral-500" />
+                          {job.images} img
+                        </span>
+                      )}
+                    </div>
+
+                    {job.techStack && (
+                      <span className="bg-neutral-900 border border-neutral-800 text-neutral-300 text-[8.5px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 truncate max-w-[120px]">
+                        <Layers className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
+                        <span className="truncate">{job.techStack}</span>
+                      </span>
+                    )}
+                  </div>
                 </a>
               ))}
             </div>
