@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Globe, ArrowRight, Clock, Trash2, CheckCircle2, Layers, HardDrive, FileText, Image as ImageIcon } from 'lucide-react';
+import { Globe, ArrowRight, Clock, Trash2, CheckCircle2, Layers, HardDrive, FileText, Image as ImageIcon, Info, Code2, Zap, ShieldCheck, Sparkles, X } from 'lucide-react';
 
 interface RecentJob {
   id: string;
@@ -22,6 +22,7 @@ export default function Home() {
   const [error, setError] = useState('');
   const [starCount, setStarCount] = useState<number | null>(null);
   const [recentJobs, setRecentJobs] = useState<RecentJob[]>([]);
+  const [isAboutOpen, setIsAboutOpen] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -69,6 +70,17 @@ export default function Home() {
       }
     } catch {}
   }, []);
+
+  // Handle Esc key to close About Modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isAboutOpen) {
+        setIsAboutOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isAboutOpen]);
 
   const handleMirror = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -134,29 +146,42 @@ export default function Home() {
           <Globe className="w-5 h-5 text-white" />
           <span className="font-semibold text-white tracking-tight">WebHarvest</span>
         </div>
-        <a
-          href="https://github.com/krishsoni15/WebHarvest"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-3 px-4.5 py-2.5 rounded-full bg-neutral-950 hover:bg-neutral-900 border border-neutral-800 text-sm font-medium text-neutral-300 hover:text-white transition-all duration-300 shadow-lg hover:scale-102 active:scale-98 group"
-        >
-          <svg
-            className="w-5 h-5 fill-current text-neutral-400 group-hover:text-white transition-colors"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
+
+        <div className="flex items-center gap-3">
+          {/* About Us Button */}
+          <button
+            onClick={() => setIsAboutOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-full bg-neutral-950 hover:bg-neutral-900 border border-neutral-800 text-sm font-medium text-neutral-300 hover:text-white transition-all duration-300 shadow-lg hover:scale-102 active:scale-98 cursor-pointer"
+            title="About WebHarvest architecture & tech stack"
           >
-            <path
-              fillRule="evenodd"
-              clipRule="evenodd"
-              d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.483 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.579.688.481C19.137 20.162 22 16.418 22 12c0-5.523-4.477-10-10-10z"
-            />
-          </svg>
-          <span className="font-semibold tracking-tight">GitHub</span>
-          <span className="h-4 w-px bg-neutral-800" />
-          <span className="flex items-center gap-1 text-amber-400 group-hover:text-amber-300 transition-colors font-mono font-bold text-sm">
-            <span className="text-[12px] select-none">★</span>{starCount !== null ? (starCount >= 1000 ? (starCount / 1000).toFixed(1) + 'k' : starCount) : '0'}
-          </span>
-        </a>
+            <Info className="w-4 h-4 text-emerald-400" />
+            <span>About WebHarvest</span>
+          </button>
+
+          <a
+            href="https://github.com/krishsoni15/WebHarvest"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-3 px-4.5 py-2.5 rounded-full bg-neutral-950 hover:bg-neutral-900 border border-neutral-800 text-sm font-medium text-neutral-300 hover:text-white transition-all duration-300 shadow-lg hover:scale-102 active:scale-98 group"
+          >
+            <svg
+              className="w-5 h-5 fill-current text-neutral-400 group-hover:text-white transition-colors"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                fillRule="evenodd"
+                clipRule="evenodd"
+                d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.483 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.579.688.481C19.137 20.162 22 16.418 22 12c0-5.523-4.477-10-10-10z"
+              />
+            </svg>
+            <span className="font-semibold tracking-tight">GitHub</span>
+            <span className="h-4 w-px bg-neutral-800" />
+            <span className="flex items-center gap-1 text-amber-400 group-hover:text-amber-300 transition-colors font-mono font-bold text-sm">
+              <span className="text-[12px] select-none">★</span>{starCount !== null ? (starCount >= 1000 ? (starCount / 1000).toFixed(1) + 'k' : starCount) : '0'}
+            </span>
+          </a>
+        </div>
       </header>
 
       {/* Premium Top Radial Glow */}
@@ -292,6 +317,126 @@ export default function Home() {
           </div>
         )}
       </main>
+
+      {/* About WebHarvest Modal Window */}
+      {isAboutOpen && (
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 md:p-6 animate-fade-in">
+          {/* Backdrop click to close */}
+          <div 
+            className="absolute inset-0 z-0"
+            onClick={() => setIsAboutOpen(false)}
+          />
+
+          <div className="relative z-10 max-w-2xl w-full glass border border-neutral-800 rounded-2xl p-6 md:p-8 space-y-6 shadow-2xl overflow-hidden animate-scale-in text-left">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-neutral-900 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-neutral-900 border border-neutral-800 flex items-center justify-center text-emerald-400">
+                  <Globe className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white tracking-tight">About WebHarvest</h2>
+                  <p className="text-xs text-neutral-400 font-mono">Next-Gen Website Harvesting & Design Extraction Engine</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsAboutOpen(false)}
+                className="p-1.5 text-neutral-500 hover:text-white hover:bg-neutral-900 rounded-lg transition-colors cursor-pointer"
+                title="Close (Esc)"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Architecture & Tech Stack Grid */}
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-widest font-mono mb-2 flex items-center gap-1.5">
+                  <Code2 className="w-3.5 h-3.5 text-emerald-400" />
+                  Core Technology Stack
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+                  <div className="bg-neutral-950 border border-neutral-900 p-2.5 rounded-xl">
+                    <span className="text-[9px] text-neutral-500 block uppercase">Framework</span>
+                    <span className="text-white font-bold text-xs mt-0.5 block">Next.js 16</span>
+                  </div>
+                  <div className="bg-neutral-950 border border-neutral-900 p-2.5 rounded-xl">
+                    <span className="text-[9px] text-neutral-500 block uppercase">UI Engine</span>
+                    <span className="text-white font-bold text-xs mt-0.5 block">React 19</span>
+                  </div>
+                  <div className="bg-neutral-950 border border-neutral-900 p-2.5 rounded-xl">
+                    <span className="text-[9px] text-neutral-500 block uppercase">Styling</span>
+                    <span className="text-white font-bold text-xs mt-0.5 block">Tailwind CSS</span>
+                  </div>
+                  <div className="bg-neutral-950 border border-neutral-900 p-2.5 rounded-xl">
+                    <span className="text-[9px] text-neutral-500 block uppercase">Crawler</span>
+                    <span className="text-white font-bold text-xs mt-0.5 block">GNU Wget</span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-widest font-mono mb-2 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  Engine Features & Capabilities
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                  <div className="bg-neutral-950/80 border border-neutral-900 p-3 rounded-xl space-y-1">
+                    <div className="flex items-center gap-2 font-bold text-white">
+                      <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                      100% Offline Mirroring
+                    </div>
+                    <p className="text-neutral-400 text-[11px] leading-relaxed">
+                      Recursively scrapes HTML, CSS, JavaScript, fonts, and images with automatic relative link rewriting.
+                    </p>
+                  </div>
+
+                  <div className="bg-neutral-950/80 border border-neutral-900 p-3 rounded-xl space-y-1">
+                    <div className="flex items-center gap-2 font-bold text-white">
+                      <Layers className="w-3.5 h-3.5 text-emerald-400" />
+                      Tech Stack Detection
+                    </div>
+                    <p className="text-neutral-400 text-[11px] leading-relaxed">
+                      Detects target platforms including WordPress, Next.js, React, Vue, Shopify, Wix, and Squarespace.
+                    </p>
+                  </div>
+
+                  <div className="bg-neutral-950/80 border border-neutral-900 p-3 rounded-xl space-y-1">
+                    <div className="flex items-center gap-2 font-bold text-white">
+                      <ImageIcon className="w-3.5 h-3.5 text-emerald-400" />
+                      Design Assets Drawer
+                    </div>
+                    <p className="text-neutral-400 text-[11px] leading-relaxed">
+                      Extracts color palettes, image assets gallery, and structured file explorer tree in one workspace.
+                    </p>
+                  </div>
+
+                  <div className="bg-neutral-950/80 border border-neutral-900 p-3 rounded-xl space-y-1">
+                    <div className="flex items-center gap-2 font-bold text-white">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      Zero-Database Architecture
+                    </div>
+                    <p className="text-neutral-400 text-[11px] leading-relaxed">
+                      Lightweight, zero-DB local-first architecture with instant ZIP export capability.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-3 border-t border-neutral-900 flex items-center justify-between text-xs text-neutral-500 font-mono">
+              <span>WebHarvest Engine v1.0</span>
+              <button
+                onClick={() => setIsAboutOpen(false)}
+                className="px-4 py-1.5 bg-neutral-900 hover:bg-neutral-800 text-white rounded-lg font-semibold transition-colors cursor-pointer text-xs"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="mt-8 text-xs text-neutral-600 tracking-wide">
