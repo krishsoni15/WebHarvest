@@ -128,7 +128,8 @@ function scanFolderStats(id: string, hostname: string) {
           stats.totalFiles++;
           stats.totalSize += stat.size;
 
-          const ext = path.extname(file).toLowerCase();
+          const cleanFile = file.split('?')[0];
+          const ext = path.extname(cleanFile).toLowerCase();
           if (ext === '.html' || ext === '.htm') {
             stats.html++;
           } else if (ext === '.css') {

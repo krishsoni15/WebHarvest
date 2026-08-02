@@ -32,15 +32,32 @@ export async function GET(
     // Helper to verify if a path can be resolved (either as a file or directory with index.html)
     function resolveFileOrDirectoryIndex(p: string): string | null {
       try {
-        if (!fs.existsSync(p)) return null;
-        const stat = fs.statSync(p);
+        let actualPath = p;
+        if (!fs.existsSync(actualPath)) {
+          // Fallback: check if the file exists on disk with query parameters appended (e.g. filename?v=123)
+          const dir = path.dirname(p);
+          const base = path.basename(p);
+          if (fs.existsSync(dir)) {
+            const files = fs.readdirSync(dir);
+            const matched = files.find(f => f === base || f.startsWith(base + '?'));
+            if (matched) {
+              actualPath = path.join(dir, matched);
+            } else {
+              return null;
+            }
+          } else {
+            return null;
+          }
+        }
+
+        const stat = fs.statSync(actualPath);
         if (stat.isDirectory()) {
-          const indexHtml = path.join(p, 'index.html');
+          const indexHtml = path.join(actualPath, 'index.html');
           if (fs.existsSync(indexHtml) && !fs.statSync(indexHtml).isDirectory()) {
             return indexHtml;
           }
         } else {
-          return p;
+          return actualPath;
         }
       } catch {}
       return null;
@@ -166,7 +183,7 @@ export async function GET(
 
     // Serve the file with correct content-type
     let fileBuffer = fs.readFileSync(filePath);
-    const mimeType = mime.lookup(filePath) || 'application/octet-stream';
+    const mimeType = mime.lookup(filePath.split('?')[0]) || 'application/octet-stream';
 
     // Intercept and rewrite absolute links in HTML or CSS to point to local preview API (only when completed)
     if (mimeType.startsWith('text/html') || mimeType.startsWith('text/css')) {
@@ -228,7 +245,7 @@ export async function GET(
     };
 
     if (download === 'true') {
-      headers['Content-Disposition'] = `attachment; filename="${path.basename(filePath)}"`;
+      headers['Content-Disposition'] = `attachment; filename="${path.basename(filePath.split('?')[0])}"`;
       headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
     } else if (job.status === 'downloading') {
       headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
@@ -237,7 +254,7 @@ export async function GET(
     }
 
     if (download === 'true') {
-      headers['Content-Disposition'] = `attachment; filename="${path.basename(filePath)}"`;
+      headers['Content-Disposition'] = `attachment; filename="${path.basename(filePath.split('?')[0])}"`;
     }
 
     return new Response(fileBuffer, { headers });

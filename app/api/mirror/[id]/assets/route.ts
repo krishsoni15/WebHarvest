@@ -72,7 +72,8 @@ export async function GET(
           if (stat.isDirectory()) {
             walk(fullPath);
           } else if (stat.isFile()) {
-            const ext = path.extname(file).toLowerCase();
+            const cleanFile = file.split('?')[0];
+            const ext = path.extname(cleanFile).toLowerCase();
             const rel = path.relative(targetDir, fullPath).replace(/\\/g, '/');
 
             // Image/Video assets: filter out FontAwesome SVG fonts, loading circles, and tiny icons (< 2KB)

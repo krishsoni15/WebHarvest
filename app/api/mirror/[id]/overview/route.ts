@@ -50,7 +50,8 @@ export async function GET(
             stats.files++;
             stats.size += stat.size;
 
-            const ext = path.extname(file).toLowerCase();
+            const cleanFile = file.split('?')[0];
+            const ext = path.extname(cleanFile).toLowerCase();
             if (ext === '.html' || ext === '.htm') {
               stats.pages++;
             } else if (['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico'].includes(ext)) {
