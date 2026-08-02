@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { activeJobs, activeProcesses, Job } from '@/lib/jobStore';
 import { getBaseDownloadDir } from '@/lib/resolveDir';
 
@@ -18,6 +19,37 @@ const BLOCKED_PATTERNS = [
   /^0\.0\.0\.0$/,
   /^\[::1?\]$/,
 ];
+
+function prepareWgetBinary(): string {
+  const isServerless = !!(process.env.VERCEL || process.env.NOW_BUILDER || process.env.NODE_ENV === 'production');
+  
+  if (isServerless) {
+    const targetPath = path.join(os.tmpdir(), 'wget');
+    const sourcePath = path.join(process.cwd(), 'bin', 'wget');
+    
+    try {
+      if (!fs.existsSync(targetPath)) {
+        fs.copyFileSync(sourcePath, targetPath);
+        fs.chmodSync(targetPath, '755');
+      }
+      return targetPath;
+    } catch (err) {
+      console.error("Failed to copy/chmod bundled wget binary:", err);
+      return 'wget';
+    }
+  }
+
+  // Locally, use the bundled binary or fallback to PATH
+  const localBinPath = path.join(process.cwd(), 'bin', 'wget');
+  if (fs.existsSync(localBinPath)) {
+    try {
+      fs.chmodSync(localBinPath, '755');
+      return localBinPath;
+    } catch {}
+  }
+  
+  return 'wget';
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -108,7 +140,8 @@ export async function POST(req: NextRequest) {
     const cleanHostname = resolvedHostname.toLowerCase().replace('www.', '');
     const domains = `${cleanHostname},www.${cleanHostname}`;
 
-    const wgetProcess = spawn('wget', [
+    const wgetExecutable = prepareWgetBinary();
+    const wgetProcess = spawn(wgetExecutable, [
       '--mirror',
       '--page-requisites',
       '--adjust-extension',
