@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local mirror downloads and logs
+/tmp/
+wget-log*
+
+# local agent/ide rules
+CLAUDE.md
+AGENTS.md
+implementation_plan.md
