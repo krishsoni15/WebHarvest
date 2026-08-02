@@ -40,7 +40,14 @@ export default function Home() {
         body: JSON.stringify({ url }),
       });
 
-      const data = await response.json();
+      let data: any = {};
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        throw new Error(`Server error (${response.status}): ${text.substring(0, 150)}`);
+      }
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to initialize website mirror');
