@@ -45,6 +45,12 @@ export function resolveTargetDir(id: string, hostname: string): string {
     return baseDir;
   }
 
+  // Check if index.html exists directly in baseDir
+  if (fs.existsSync(path.join(baseDir, 'index.html'))) {
+    cacheResolvedDir(id, baseDir);
+    return baseDir;
+  }
+
   try {
     const subdirs = fs.readdirSync(baseDir).filter(f => {
       try {
@@ -86,12 +92,24 @@ export function resolveTargetDir(id: string, hostname: string): string {
         cacheResolvedDir(id, targetDir);
         return targetDir;
       }
+    } else {
+      // If there are no subdirectories, but baseDir has files, use baseDir!
+      const files = fs.readdirSync(baseDir).filter(f => !f.startsWith('.'));
+      if (files.length > 0) {
+        cacheResolvedDir(id, baseDir);
+        return baseDir;
+      }
     }
   } catch {}
 
   // Fallback to basic hostname path if folder counting failed or is empty
   const fallbackPath = path.join(baseDir, hostname);
-  return fallbackPath;
+  if (fs.existsSync(fallbackPath)) {
+    cacheResolvedDir(id, fallbackPath);
+    return fallbackPath;
+  }
+
+  return baseDir;
 }
 
 /**
@@ -105,35 +123,41 @@ export function ensureJobExists(id: string): boolean {
 
   if (!fs.existsSync(baseDir)) return false;
 
-  // Reconstruct the job from the filesystem
-  const subdirs = fs.readdirSync(baseDir).filter(f => {
-    try {
-      const p = path.join(baseDir, f);
-      return fs.statSync(p).isDirectory() && !f.startsWith('.');
-    } catch {
-      return false;
-    }
-  });
+  try {
+    const items = fs.readdirSync(baseDir).filter(f => !f.startsWith('.'));
+    if (items.length === 0) return false;
 
-  let bestHostname = 'mirrored-site';
-  let maxFiles = -1;
-  for (const dir of subdirs) {
-    const count = countFilesRecursive(path.join(baseDir, dir));
-    if (count > maxFiles) {
-      maxFiles = count;
-      bestHostname = dir;
+    const subdirs = items.filter(f => {
+      try {
+        return fs.statSync(path.join(baseDir, f)).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+
+    let bestHostname = 'mirrored-site';
+    let maxFiles = -1;
+
+    for (const dir of subdirs) {
+      const count = countFilesRecursive(path.join(baseDir, dir));
+      if (count > maxFiles) {
+        maxFiles = count;
+        bestHostname = dir;
+      }
     }
+
+    activeJobs.set(id, {
+      id,
+      url: `https://${bestHostname}`,
+      hostname: bestHostname,
+      status: 'completed',
+      addedAt: Date.now(),
+    });
+
+    return true;
+  } catch {
+    return false;
   }
-
-  activeJobs.set(id, {
-    id,
-    url: `https://${bestHostname}`,
-    hostname: bestHostname,
-    status: 'completed',
-    addedAt: Date.now(),
-  });
-
-  return true;
 }
 
 /** Cache the resolved directory on the job object for stability */

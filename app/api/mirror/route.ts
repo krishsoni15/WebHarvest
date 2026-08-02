@@ -177,30 +177,20 @@ export async function POST(req: NextRequest) {
       const job = activeJobs.get(id);
       if (job) {
         const sitePath = path.join(downloadDir, resolvedHostname);
-        // Check multiple possible directories for files
-        let hasFiles = fs.existsSync(sitePath) && fs.readdirSync(sitePath).length > 0;
-        
-        if (!hasFiles) {
-          // Check www. variant or any subdirectory
-          try {
-            const subdirs = fs.readdirSync(downloadDir).filter(f => {
-              try {
-                return fs.statSync(path.join(downloadDir, f)).isDirectory() && !f.startsWith('.');
-              } catch { return false; }
-            });
-            hasFiles = subdirs.some(d => {
-              try {
-                return fs.readdirSync(path.join(downloadDir, d)).length > 0;
-              } catch { return false; }
-            });
-          } catch {}
-        }
+        // Check if downloadDir has any files or directories downloaded
+        let hasFiles = false;
+        try {
+          if (fs.existsSync(downloadDir)) {
+            const items = fs.readdirSync(downloadDir).filter(f => !f.startsWith('.'));
+            hasFiles = items.length > 0;
+          }
+        } catch {}
 
         if (hasFiles) {
           job.status = 'completed';
         } else {
           job.status = 'failed';
-          job.error = `wget failed to retrieve site files (exit code ${code})`;
+          job.error = `wget failed to retrieve site files (exit code ${code ?? 'terminated'})`;
         }
         job.completedAt = Date.now();
         activeJobs.set(id, job);

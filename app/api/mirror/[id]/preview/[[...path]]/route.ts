@@ -34,12 +34,20 @@ export async function GET(
       try {
         let actualPath = p;
         if (!fs.existsSync(actualPath)) {
-          // Fallback: check if the file exists on disk with query parameters appended (e.g. filename?v=123)
+          // Fallback: check if the file exists on disk with query parameters or encoded variants appended
           const dir = path.dirname(p);
           const base = path.basename(p);
           if (fs.existsSync(dir)) {
             const files = fs.readdirSync(dir);
-            const matched = files.find(f => f === base || f.startsWith(base + '?'));
+            const cleanBase = base.split('?')[0].split('%3F')[0].split('@')[0];
+            const matched = files.find(f => {
+              if (f === base) return true;
+              const cleanF = f.split('?')[0].split('%3F')[0].split('@')[0];
+              if (cleanF === cleanBase || cleanF === base) return true;
+              if (f.startsWith(base + '?') || f.startsWith(base + '%3F') || f.startsWith(base + '@')) return true;
+              if (f.startsWith(cleanBase + '?') || f.startsWith(cleanBase + '%3F') || f.startsWith(cleanBase + '@')) return true;
+              return false;
+            });
             if (matched) {
               actualPath = path.join(dir, matched);
             } else {
