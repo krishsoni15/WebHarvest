@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -21,6 +21,14 @@ const BLOCKED_PATTERNS = [
 ];
 
 function prepareWgetBinary(): string {
+  // Always prefer system 'wget' if available in PATH (avoids static glibc DNS resolution issues)
+  try {
+    const check = spawnSync('wget', ['--version']);
+    if (check.status === 0) {
+      return 'wget';
+    }
+  } catch {}
+
   const isServerless = !!(process.env.VERCEL || process.env.NOW_BUILDER || process.env.NODE_ENV === 'production');
   
   if (isServerless) {
@@ -39,7 +47,7 @@ function prepareWgetBinary(): string {
     }
   }
 
-  // Locally, use the bundled binary or fallback to PATH
+  // Locally, use the bundled binary as last resort
   const localBinPath = path.join(process.cwd(), 'bin', 'wget');
   if (fs.existsSync(localBinPath)) {
     try {
