@@ -31,31 +31,25 @@ export function getBaseDownloadDir(id?: string): string {
 export function resolveTargetDir(id: string, hostname: string): string {
   const baseDir = getBaseDownloadDir(id);
 
-  // Check if we already resolved this job's directory (only cache when completed to allow live updates during download)
-  const job = activeJobs.get(id);
-  if (job?.status === 'completed' && job?.resolvedDir && fs.existsSync(job.resolvedDir)) {
-    // Self-healing: if the cached folder has almost no files (<= 2), re-resolve to find the main assets/content folder
-    const cachedCount = countFilesRecursive(job.resolvedDir);
-    if (cachedCount > 2) {
-      return job.resolvedDir;
-    }
-  }
-
   if (!fs.existsSync(baseDir)) {
     return baseDir;
   }
 
-  // Check if index.html exists directly in baseDir
-  if (fs.existsSync(path.join(baseDir, 'index.html'))) {
-    cacheResolvedDir(id, baseDir);
-    return baseDir;
+  const job = activeJobs.get(id);
+
+  // Check if we already resolved this job's directory (only use cache if completed and directory actually exists and has content)
+  if (job?.status === 'completed' && job?.resolvedDir && fs.existsSync(job.resolvedDir)) {
+    if (fs.existsSync(path.join(job.resolvedDir, 'index.html')) || countFilesRecursive(job.resolvedDir) > 0) {
+      return job.resolvedDir;
+    }
   }
 
   try {
-    const subdirs = fs.readdirSync(baseDir).filter(f => {
+    const items = fs.readdirSync(baseDir).filter(f => !f.startsWith('.') && f !== 'crawl_logs.txt');
+
+    const subdirs = items.filter(f => {
       try {
-        const p = path.join(baseDir, f);
-        return fs.statSync(p).isDirectory() && !f.startsWith('.');
+        return fs.statSync(path.join(baseDir, f)).isDirectory();
       } catch {
         return false;
       }
@@ -65,20 +59,22 @@ export function resolveTargetDir(id: string, hostname: string): string {
       const cleanHostname = hostname.toLowerCase().replace('www.', '');
 
       const scoredDirs = subdirs.map(dir => {
-        const count = countFilesRecursive(path.join(baseDir, dir));
+        const dirPath = path.join(baseDir, dir);
+        const count = countFilesRecursive(dirPath);
         
-        // Check if directory matches the target domain (with or without www)
         const lowerDir = dir.toLowerCase();
         const isDomainMatch = lowerDir.includes(cleanHostname) || cleanHostname.includes(lowerDir);
+        const hasIndex = fs.existsSync(path.join(dirPath, 'index.html'));
         
-        // High multiplier for domain matches, low multiplier for external CDNs/assets
-        const multiplier = isDomainMatch ? 10000 : 1;
+        let multiplier = 1;
+        if (isDomainMatch) multiplier *= 10000;
+        if (hasIndex) multiplier *= 5;
+
         const score = count * multiplier;
 
         return { dir, count, score };
       });
 
-      // Sort by score descending. In case of tie, sort by count descending.
       scoredDirs.sort((a, b) => {
         if (b.score !== a.score) {
           return b.score - a.score;
@@ -86,26 +82,37 @@ export function resolveTargetDir(id: string, hostname: string): string {
         return b.count - a.count;
       });
 
-      // If the best scored folder has at least one file, use it
       if (scoredDirs[0].count > 0) {
         const targetDir = path.join(baseDir, scoredDirs[0].dir);
-        cacheResolvedDir(id, targetDir);
+        if (job?.status === 'completed') {
+          cacheResolvedDir(id, targetDir);
+        }
         return targetDir;
       }
-    } else {
-      // If there are no subdirectories, but baseDir has files, use baseDir!
-      const files = fs.readdirSync(baseDir).filter(f => !f.startsWith('.'));
-      if (files.length > 0) {
-        cacheResolvedDir(id, baseDir);
-        return baseDir;
+    }
+
+    // Check if index.html or files exist directly in baseDir
+    const nonLogFiles = items.filter(f => {
+      try {
+        return fs.statSync(path.join(baseDir, f)).isFile();
+      } catch {
+        return false;
       }
+    });
+
+    if (fs.existsSync(path.join(baseDir, 'index.html')) || nonLogFiles.length > 0) {
+      if (job?.status === 'completed') {
+        cacheResolvedDir(id, baseDir);
+      }
+      return baseDir;
     }
   } catch {}
 
-  // Fallback to basic hostname path if folder counting failed or is empty
   const fallbackPath = path.join(baseDir, hostname);
   if (fs.existsSync(fallbackPath)) {
-    cacheResolvedDir(id, fallbackPath);
+    if (job?.status === 'completed') {
+      cacheResolvedDir(id, fallbackPath);
+    }
     return fallbackPath;
   }
 
@@ -124,7 +131,7 @@ export function ensureJobExists(id: string): boolean {
   if (!fs.existsSync(baseDir)) return false;
 
   try {
-    const items = fs.readdirSync(baseDir).filter(f => !f.startsWith('.'));
+    const items = fs.readdirSync(baseDir).filter(f => !f.startsWith('.') && f !== 'crawl_logs.txt');
     if (items.length === 0) return false;
 
     const subdirs = items.filter(f => {
@@ -175,6 +182,7 @@ function countFilesRecursive(dir: string): number {
   try {
     const list = fs.readdirSync(dir);
     for (const item of list) {
+      if (item.startsWith('.') || item === 'crawl_logs.txt') continue;
       const fp = path.join(dir, item);
       try {
         const stat = fs.statSync(fp);
