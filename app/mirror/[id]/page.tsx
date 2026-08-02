@@ -60,8 +60,12 @@ export default function MirrorDashboard() {
   const router = useRouter();
 
   const [starCount, setStarCount] = useState<number | null>(null);
+  const [origin, setOrigin] = useState('http://localhost:3000');
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setOrigin(window.location.origin);
+    }
     fetch(`https://api.github.com/repos/krishsoni15/WebHarvest?t=${Date.now()}`, {
       cache: 'no-store',
     })
@@ -622,7 +626,7 @@ export default function MirrorDashboard() {
                 {/* Localhost Address Indicator */}
                 <div className="flex-1 w-full bg-neutral-950 border border-neutral-900 rounded-lg px-3 py-1.5 flex items-center gap-2 text-[10px] text-neutral-400 font-mono overflow-hidden">
                   <Globe className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
-                  <span className="text-emerald-500/70 select-none">http://localhost:3000</span>
+                  <span className="text-emerald-500/70 select-none">{origin}</span>
                   <span className="text-neutral-500 select-none">/api/mirror/{id}/preview/</span>
                   <span className="text-neutral-200 truncate">{previewPath}</span>
                 </div>
