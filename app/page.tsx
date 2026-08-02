@@ -20,7 +20,7 @@ export default function Home() {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [starCount, setStarCount] = useState<number>(3);
+  const [starCount, setStarCount] = useState<number | null>(null);
   const [recentJobs, setRecentJobs] = useState<RecentJob[]>([]);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const router = useRouter();
@@ -176,7 +176,7 @@ export default function Home() {
             <span className="font-semibold tracking-tight">GitHub</span>
             <span className="h-4 w-px bg-neutral-800" />
             <span className="flex items-center gap-1 text-amber-400 group-hover:text-amber-300 transition-colors font-mono font-bold text-sm">
-              <span className="text-[12px] select-none">★</span>{starCount >= 1000 ? (starCount / 1000).toFixed(1) + 'k' : starCount}
+              <span className="text-[12px] select-none">★</span>{starCount !== null ? (starCount >= 1000 ? (starCount / 1000).toFixed(1) + 'k' : starCount) : '...'}
             </span>
           </a>
         </div>
