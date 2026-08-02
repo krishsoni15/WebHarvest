@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import path from 'path';
 import fs from 'fs';
 import { activeJobs } from '@/lib/jobStore';
-import { resolveTargetDir } from '@/lib/resolveDir';
+import { resolveTargetDir, getBaseDownloadDir } from '@/lib/resolveDir';
 
 export async function GET(
   req: NextRequest,
@@ -95,7 +95,7 @@ export async function GET(
 
 function scanFolderStats(id: string, hostname: string) {
   const targetDir = resolveTargetDir(id, hostname);
-  const baseDir = path.join(process.cwd(), 'tmp', 'downloads', id);
+  const baseDir = getBaseDownloadDir(id);
 
   const stats = {
     html: 0,

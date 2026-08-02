@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
-import { resolveTargetDir, ensureJobExists } from '@/lib/resolveDir';
+import { resolveTargetDir, ensureJobExists, getBaseDownloadDir } from '@/lib/resolveDir';
 import { activeJobs } from '@/lib/jobStore';
 
 export const dynamic = 'force-dynamic';
@@ -27,7 +27,7 @@ export async function GET(
       }
     }
 
-    const baseDir = path.join(process.cwd(), 'tmp', 'downloads', id);
+    const baseDir = getBaseDownloadDir(id);
     const targetDir = resolveTargetDir(id, job.hostname);
 
     if (!fs.existsSync(targetDir)) {

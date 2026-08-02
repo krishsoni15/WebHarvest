@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { activeJobs, activeProcesses, Job } from '@/lib/jobStore';
+import { getBaseDownloadDir } from '@/lib/resolveDir';
 
 // Rate limiting: max concurrent downloads
 const MAX_CONCURRENT_JOBS = 5;
@@ -87,7 +88,7 @@ export async function POST(req: NextRequest) {
 
     const resolvedHostname = parsedUrl.hostname;
     const id = Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
-    const downloadDir = path.join(process.cwd(), 'tmp', 'downloads', id);
+    const downloadDir = getBaseDownloadDir(id);
 
     fs.mkdirSync(downloadDir, { recursive: true });
 

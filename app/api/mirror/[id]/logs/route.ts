@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
+import { getBaseDownloadDir } from '@/lib/resolveDir';
 
 export async function GET(
   req: NextRequest,
@@ -8,7 +9,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const logFilePath = path.join(process.cwd(), 'tmp', 'downloads', id, 'crawl_logs.txt');
+    const logFilePath = path.join(getBaseDownloadDir(id), 'crawl_logs.txt');
 
     if (!fs.existsSync(logFilePath)) {
       return NextResponse.json({ logs: 'Waiting for crawl process to start...' });

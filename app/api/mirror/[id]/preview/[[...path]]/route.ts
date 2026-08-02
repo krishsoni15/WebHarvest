@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import path from 'path';
 import fs from 'fs';
 import mime from 'mime-types';
-import { resolveTargetDir, ensureJobExists } from '@/lib/resolveDir';
+import { resolveTargetDir, ensureJobExists, getBaseDownloadDir } from '@/lib/resolveDir';
 import { activeJobs } from '@/lib/jobStore';
 
 export async function GET(
@@ -18,7 +18,7 @@ export async function GET(
     }
 
     const job = activeJobs.get(id)!;
-    const baseDir = path.join(process.cwd(), 'tmp', 'downloads', id);
+    const baseDir = getBaseDownloadDir(id);
     const targetDir = resolveTargetDir(id, job.hostname);
 
     if (!fs.existsSync(targetDir)) {

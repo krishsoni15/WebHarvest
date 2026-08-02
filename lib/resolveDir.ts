@@ -1,6 +1,17 @@
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { activeJobs } from '@/lib/jobStore';
+
+/**
+ * Get the base directory for downloads, handling read-only environments like Vercel.
+ */
+export function getBaseDownloadDir(id?: string): string {
+  const baseDir = (process.env.VERCEL || process.env.NOW_BUILDER || process.env.NODE_ENV === 'production')
+    ? path.join(os.tmpdir(), 'downloads')
+    : path.join(process.cwd(), 'tmp', 'downloads');
+  return id ? path.join(baseDir, id) : baseDir;
+}
 
 /**
  * Centralized directory resolution for mirrored sites.
@@ -18,7 +29,7 @@ import { activeJobs } from '@/lib/jobStore';
  *   5. Largest-file-count heuristic (fallback)
  */
 export function resolveTargetDir(id: string, hostname: string): string {
-  const baseDir = path.join(process.cwd(), 'tmp', 'downloads', id);
+  const baseDir = getBaseDownloadDir(id);
 
   // Check if we already resolved this job's directory (only cache when completed to allow live updates during download)
   const job = activeJobs.get(id);
@@ -90,7 +101,8 @@ export function resolveTargetDir(id: string, hostname: string): string {
 export function ensureJobExists(id: string): boolean {
   if (activeJobs.has(id)) return true;
 
-  const baseDir = path.join(process.cwd(), 'tmp', 'downloads', id);
+  const baseDir = getBaseDownloadDir(id);
+
   if (!fs.existsSync(baseDir)) return false;
 
   // Reconstruct the job from the filesystem
