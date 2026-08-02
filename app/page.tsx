@@ -2,13 +2,21 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Globe, ArrowRight } from 'lucide-react';
+import { Globe, ArrowRight, Clock, Trash2, CheckCircle2 } from 'lucide-react';
+
+interface RecentJob {
+  id: string;
+  url: string;
+  hostname: string;
+  addedAt: number;
+}
 
 export default function Home() {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [starCount, setStarCount] = useState<number | null>(null);
+  const [recentJobs, setRecentJobs] = useState<RecentJob[]>([]);
   const router = useRouter();
 
   useEffect(() => {
@@ -22,6 +30,14 @@ export default function Home() {
         }
       })
       .catch(() => {});
+
+    // Load recent harvest history from localStorage
+    try {
+      const saved = localStorage.getItem('webharvest_recent_jobs');
+      if (saved) {
+        setRecentJobs(JSON.parse(saved));
+      }
+    } catch {}
   }, []);
 
   const handleMirror = async (e: React.FormEvent) => {
@@ -53,6 +69,21 @@ export default function Home() {
         throw new Error(data.error || 'Failed to initialize website mirror');
       }
 
+      // Save to recent jobs history
+      try {
+        const formattedUrl = url.startsWith('http') ? url : `https://${url}`;
+        const host = new URL(formattedUrl).hostname;
+        const newJob: RecentJob = {
+          id: data.id,
+          url: formattedUrl,
+          hostname: host,
+          addedAt: Date.now(),
+        };
+        const existing: RecentJob[] = JSON.parse(localStorage.getItem('webharvest_recent_jobs') || '[]');
+        const updated = [newJob, ...existing.filter((j) => j.id !== data.id)].slice(0, 6);
+        localStorage.setItem('webharvest_recent_jobs', JSON.stringify(updated));
+      } catch {}
+
       router.push(`/mirror/${data.id}`);
     } catch (err: any) {
       setError(err.message || 'An error occurred. Please check the URL and try again.');
@@ -60,8 +91,13 @@ export default function Home() {
     }
   };
 
+  const handleClearHistory = () => {
+    localStorage.removeItem('webharvest_recent_jobs');
+    setRecentJobs([]);
+  };
+
   return (
-    <div className="relative flex flex-col flex-1 items-center justify-center min-h-screen px-4 overflow-hidden">
+    <div className="relative flex flex-col flex-1 items-center justify-center min-h-screen px-4 overflow-hidden py-12">
       {/* Top Header/Navbar */}
       <header className="absolute top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 max-w-7xl mx-auto w-full">
         <div className="flex items-center gap-2">
@@ -96,7 +132,7 @@ export default function Home() {
       {/* Premium Top Radial Glow */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-gradient-to-b from-neutral-900/40 to-transparent rounded-full blur-3xl pointer-events-none" />
 
-      <main className="w-full max-w-xl flex flex-col items-center text-center space-y-10 z-10">
+      <main className="w-full max-w-xl flex flex-col items-center text-center space-y-8 z-10 my-auto">
         {/* Brand/Logo */}
         <div className="flex flex-col items-center space-y-3">
           <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-neutral-900 border border-neutral-800 shadow-inner">
@@ -106,7 +142,7 @@ export default function Home() {
             WebHarvest
           </h1>
           <p className="text-neutral-400 text-sm">
-            Paste any public website URL
+            Paste any public website URL to capture & mirror
           </p>
         </div>
 
@@ -127,7 +163,7 @@ export default function Home() {
             <button
               type="submit"
               disabled={loading}
-              className="h-14 px-6 rounded-xl bg-white text-black font-semibold hover:bg-neutral-250 active:scale-98 transition-all duration-200 shadow-md flex items-center justify-center gap-2 group disabled:opacity-50"
+              className="h-14 px-6 rounded-xl bg-white text-black font-semibold hover:bg-neutral-250 active:scale-98 transition-all duration-200 shadow-md flex items-center justify-center gap-2 group disabled:opacity-50 shrink-0 cursor-pointer"
             >
               {loading ? (
                 <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin" />
@@ -146,10 +182,56 @@ export default function Home() {
             </p>
           )}
         </form>
+
+        {/* Recent Harvests History Deck */}
+        {recentJobs.length > 0 && (
+          <div className="w-full pt-6 space-y-3 border-t border-neutral-900/80 animate-fade-in">
+            <div className="flex items-center justify-between text-xs text-neutral-500 font-mono font-medium">
+              <span className="flex items-center gap-1.5 text-neutral-400">
+                <Clock className="w-3.5 h-3.5 text-emerald-500" />
+                RECENT HARVESTS ({recentJobs.length})
+              </span>
+              <button
+                onClick={handleClearHistory}
+                className="text-[10px] text-neutral-600 hover:text-red-400 transition-colors cursor-pointer flex items-center gap-1"
+                title="Clear local history"
+              >
+                <Trash2 className="w-3 h-3" />
+                Clear
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {recentJobs.map((job) => (
+                <a
+                  key={job.id}
+                  href={`/mirror/${job.id}`}
+                  className="bg-neutral-950/80 hover:bg-neutral-900/60 border border-neutral-900 hover:border-neutral-800 p-3 rounded-xl flex items-center justify-between text-left transition-all duration-200 group cursor-pointer shadow-md"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center text-emerald-400 font-bold font-mono text-xs shrink-0">
+                      {job.hostname.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">
+                        {job.hostname}
+                      </p>
+                      <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 font-mono mt-0.5">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
+                        <span>100% Captured</span>
+                      </div>
+                    </div>
+                  </div>
+                  <ArrowRight className="w-3.5 h-3.5 text-neutral-600 group-hover:text-white group-hover:translate-x-1 transition-all shrink-0 ml-2" />
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Footer */}
-      <footer className="absolute bottom-6 text-xs text-neutral-650 tracking-wide">
+      <footer className="mt-8 text-xs text-neutral-600 tracking-wide">
         &copy; {new Date().getFullYear()} WebHarvest. All rights reserved.
       </footer>
     </div>
