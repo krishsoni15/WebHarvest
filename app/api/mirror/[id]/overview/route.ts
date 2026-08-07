@@ -132,6 +132,8 @@ export async function GET(
       url: job.url,
       hostname: job.hostname,
       techStack,
+      status: job.status,
+      error: job.error,
       stats: {
         pages: stats.pages,
         images: stats.images,

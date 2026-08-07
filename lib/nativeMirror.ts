@@ -132,6 +132,29 @@ export async function runNativeMirror(id: string, url: string, hostname: string,
       }
     }
 
+    // Extract PDFs & Documents
+    const docsDir = path.join(targetDir, 'docs');
+    fs.mkdirSync(docsDir, { recursive: true });
+    const docLinkRegex = /<(?:a|iframe|embed|object)[^>]+(?:href|src|data)=["']([^"']+\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|csv|txt|zip)(?:\?[^"']*)?)["']/gi;
+    let docIdx = 0;
+    while ((match = docLinkRegex.exec(html)) !== null) {
+      const fullUrl = resolveUrl(match[1]);
+      if (fullUrl && !fullUrl.startsWith('data:')) {
+        docIdx++;
+        const rawExt = path.extname(new URL(fullUrl).pathname) || '.pdf';
+        const cleanExt = rawExt.split('?')[0];
+        const baseName = path.basename(new URL(fullUrl).pathname, rawExt) || `document_${docIdx}`;
+        const filename = `${baseName}_${docIdx}${cleanExt}`;
+        assetsToFetch.push({
+          url: fullUrl,
+          type: 'img', // queued for asset fetcher
+          localPath: path.join(docsDir, filename),
+          relPath: `docs/${filename}`,
+        });
+        html = html.replace(match[1], `./docs/${filename}`);
+      }
+    }
+
     // Save modified HTML index
     fs.writeFileSync(path.join(targetDir, 'index.html'), html, 'utf-8');
     appendLog(`[WRITE] Saved index.html with relative link rewrites`);

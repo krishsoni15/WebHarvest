@@ -21,6 +21,8 @@ import {
   Check,
   RefreshCw,
   Image,
+  FileText,
+  FileCode,
 } from 'lucide-react';
 
 interface FileNode {
@@ -94,7 +96,6 @@ export default function MirrorDashboard() {
   const [viewport, setViewport] = useState<'desktop' | 'tablet' | 'phone'>('desktop');
   const [overviewData, setOverviewData] = useState<Overview | null>(null);
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
-  const [loadingDetails, setLoadingDetails] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(10);
   const [htmlPages, setHtmlPages] = useState<string[]>([]);
   const [previewPath, setPreviewPath] = useState<string>('index.html');
@@ -195,10 +196,12 @@ export default function MirrorDashboard() {
       fetch(`/api/mirror/${id}/overview`)
         .then((res) => res.json())
         .then((data) => {
-          if (data.stats && (data.stats.files > 0 || data.stats.pages > 0)) {
+          if (data.status === 'completed') {
             setStatus('completed');
             setLoadingProgress(100);
             fetchDetails();
+          } else if (data.status === 'failed') {
+            setStatus('failed');
           }
         })
         .catch(() => {});
@@ -218,10 +221,12 @@ export default function MirrorDashboard() {
         const res = await fetch(`/api/mirror/${id}/overview`);
         if (res.ok) {
           const data = await res.json();
-          if (data.stats && (data.stats.files > 0 || data.stats.pages > 0)) {
-            setStatus('completed');
-            setLoadingProgress(100);
-            fetchDetails();
+          if (data.status === 'completed' || data.status === 'failed') {
+            setStatus(data.status);
+            if (data.status === 'completed') {
+              setLoadingProgress(100);
+              fetchDetails();
+            }
           }
         }
       } catch {}
@@ -396,7 +401,7 @@ export default function MirrorDashboard() {
       window.removeEventListener('resize', updateScale);
       clearTimeout(timer);
     };
-  }, [viewport, loadingDetails]);
+  }, [viewport]);
 
   // Track page changes inside the preview iframe & inject sleek styling
   const handleIframeLoad = (e: any) => {
@@ -452,7 +457,6 @@ export default function MirrorDashboard() {
 
   // Fetch final details once job is complete
   const fetchDetails = async () => {
-    setLoadingDetails(true);
     try {
       const [overviewRes, filesRes] = await Promise.all([
         fetch(`/api/mirror/${id}/overview`),
@@ -471,8 +475,6 @@ export default function MirrorDashboard() {
       await fetchAssets();
     } catch (err) {
       console.error('Failed to load finished job details', err);
-    } finally {
-      setLoadingDetails(false);
     }
   };
 
@@ -659,13 +661,7 @@ export default function MirrorDashboard() {
 
       {/* Main Workspace Layout */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 lg:py-8">
-        {loadingDetails ? (
-          <div className="flex flex-col items-center justify-center py-32 space-y-3">
-            <Loader2 className="w-8 h-8 animate-spin text-neutral-500" />
-            <p className="text-sm text-neutral-500">Retrieving offline site pages...</p>
-          </div>
-        ) : (
-          <div className="flex flex-col lg:flex-row gap-6 items-start">
+        <div className="flex flex-col lg:flex-row gap-6 items-start">
             {/* Left: Preview Mockup and Address Control Deck */}
             <div className="flex-1 w-full lg:max-w-[72%]">
               
@@ -1102,7 +1098,6 @@ export default function MirrorDashboard() {
               </div>
             </div>
           </div>
-        )}
 
       {/* Terminal System Logs Modal Overlay (Laptop aspect ratio) */}
       {isDiagnosticsOpen && (
@@ -1306,7 +1301,11 @@ export default function MirrorDashboard() {
                         {assets.images && assets.images.length > 0 ? (
                           <div className="grid grid-cols-3 gap-2">
                             {assets.images.map((img, idx) => {
-                              const isVideo = ['mp4', 'webm', 'ogg', 'mov'].includes(img.name.split('.').pop()?.toLowerCase() || '');
+                              const ext = img.name.split('.').pop()?.toLowerCase() || '';
+                              const isVideo = ['mp4', 'webm', 'ogg', 'mov'].includes(ext);
+                              const isPdf = ext === 'pdf' || (img as any).type === 'pdf';
+                              const isDoc = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'csv', 'txt', 'zip'].includes(ext) || (img as any).type === 'document';
+
                               return (
                                 <div 
                                   key={img.path}
@@ -1316,14 +1315,24 @@ export default function MirrorDashboard() {
                                   <div 
                                     onClick={() => setLightboxImage(img.previewUrl)}
                                     className="w-full aspect-square transparency-pattern border border-neutral-800 rounded-lg overflow-hidden flex items-center justify-center shrink-0 cursor-pointer hover:scale-[1.02] transition-all relative"
-                                    title={isVideo ? "Inspect video" : "Inspect image"}
+                                    title={isPdf ? "Inspect PDF" : isDoc ? "Inspect document" : isVideo ? "Inspect video" : "Inspect image"}
                                   >
-                                    {/* Image number badge */}
+                                    {/* Asset type number badge */}
                                     <span className="absolute top-1 left-1 bg-black/70 text-neutral-300 text-[7px] font-mono font-bold px-1.5 py-0.5 rounded z-10 select-none">
                                       {idx + 1}/{assets.images.length}
                                     </span>
 
-                                    {isVideo ? (
+                                    {isPdf ? (
+                                      <div className="w-full h-full flex flex-col items-center justify-center bg-red-950/30 text-red-400 p-2">
+                                        <FileText className="w-8 h-8 text-red-500 mb-1 group-hover:scale-110 transition-transform" />
+                                        <span className="text-[7.5px] font-mono font-bold text-red-400 uppercase tracking-tight">PDF DOCUMENT</span>
+                                      </div>
+                                    ) : isDoc ? (
+                                      <div className="w-full h-full flex flex-col items-center justify-center bg-blue-950/30 text-blue-400 p-2">
+                                        <FileCode className="w-8 h-8 text-blue-400 mb-1 group-hover:scale-110 transition-transform" />
+                                        <span className="text-[7.5px] font-mono font-bold text-blue-400 uppercase tracking-tight">{ext.toUpperCase()}</span>
+                                      </div>
+                                    ) : isVideo ? (
                                       <video 
                                         src={img.previewUrl} 
                                         className="max-w-[95%] max-h-[95%] object-contain group-hover:scale-105 transition-transform duration-300 rounded"
@@ -1354,7 +1363,7 @@ export default function MirrorDashboard() {
                                     href={`${img.previewUrl}?download=true`}
                                     download
                                     className="absolute top-2 right-2 p-1 text-neutral-400 hover:text-white rounded bg-neutral-900 border border-neutral-800 hover:border-neutral-700 transition-all cursor-pointer z-10"
-                                    title="Download asset"
+                                    title="Download file"
                                     onClick={(e) => e.stopPropagation()}
                                   >
                                     <Download className="w-2.5 h-2.5" />
@@ -1373,7 +1382,7 @@ export default function MirrorDashboard() {
                           </div>
                         ) : (
                           <div className="bg-neutral-950 border border-neutral-900/80 p-4 rounded-xl text-center">
-                            <p className="text-xs text-neutral-500">No images extracted.</p>
+                            <p className="text-xs text-neutral-500">No assets extracted.</p>
                           </div>
                         )}
                       </div>
@@ -1408,7 +1417,13 @@ export default function MirrorDashboard() {
             className="relative max-w-5xl max-h-[85vh] w-full flex items-center justify-center p-2 rounded-2xl transparency-pattern border border-neutral-900"
             onClick={(e) => e.stopPropagation()}
           >
-            {/\.(mp4|webm|ogg|mov)(?:\?|$)/i.test(lightboxImage) ? (
+            {/\.pdf(?:\?|$)/i.test(lightboxImage) ? (
+              <iframe 
+                src={lightboxImage} 
+                className="w-full h-[80vh] rounded-lg border border-neutral-900 bg-white"
+                title="PDF Document Preview"
+              />
+            ) : /\.(mp4|webm|ogg|mov)(?:\?|$)/i.test(lightboxImage) ? (
               <video 
                 src={lightboxImage} 
                 className="max-w-full max-h-[80vh] object-contain rounded-lg animate-scale-up"
@@ -1488,8 +1503,8 @@ export default function MirrorDashboard() {
         </div>
       )}
 
-    </div>
-  );
+  </div>
+);
 }
 
 function formatBytes(bytes: number) {

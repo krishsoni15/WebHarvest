@@ -2,13 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Globe, ArrowRight, Clock, Trash2, CheckCircle2, Layers, HardDrive, FileText, Image as ImageIcon, Info, Code2, Zap, ShieldCheck, Sparkles, X, AlertTriangle } from 'lucide-react';
+import { Globe, ArrowRight, Clock, Trash2, CheckCircle2, Layers, HardDrive, FileText, Image as ImageIcon, Info, Code2, Zap, ShieldCheck, Sparkles, X, AlertTriangle, Loader2 } from 'lucide-react';
 
 interface RecentJob {
   id: string;
   url: string;
   hostname: string;
   addedAt: number;
+  status?: string;
   techStack?: string;
   size?: string;
   pages?: number;
@@ -42,29 +43,35 @@ export default function Home() {
         const parsed: RecentJob[] = JSON.parse(saved);
         setRecentJobs(parsed);
 
-        // Fetch fresh metadata/overview for each recent job
-        parsed.forEach(async (job) => {
-          try {
-            const res = await fetch(`/api/mirror/${job.id}/overview`);
-            if (res.ok) {
-              const data = await res.json();
-              setRecentJobs((prev) =>
-                prev.map((j) =>
-                  j.id === job.id
-                    ? {
-                        ...j,
-                        techStack: data.techStack,
-                        size: data.stats?.size,
-                        pages: data.stats?.pages,
-                        images: data.stats?.images,
-                        files: data.stats?.files,
-                      }
-                    : j
-                )
-              );
-            }
-          } catch {}
-        });
+        const refreshAllJobs = () => {
+          parsed.forEach(async (job) => {
+            try {
+              const res = await fetch(`/api/mirror/${job.id}/overview`);
+              if (res.ok) {
+                const data = await res.json();
+                setRecentJobs((prev) =>
+                  prev.map((j) =>
+                    j.id === job.id
+                      ? {
+                          ...j,
+                          status: data.status,
+                          techStack: data.techStack,
+                          size: data.stats?.size,
+                          pages: data.stats?.pages,
+                          images: data.stats?.images,
+                          files: data.stats?.files,
+                        }
+                      : j
+                  )
+                );
+              }
+            } catch {}
+          });
+        };
+
+        refreshAllJobs();
+        const interval = setInterval(refreshAllJobs, 3000);
+        return () => clearInterval(interval);
       }
     } catch {}
   }, []);
@@ -117,6 +124,7 @@ export default function Home() {
           id: data.id,
           url: formattedUrl,
           hostname: host,
+          status: 'downloading',
           addedAt: Date.now(),
         };
         const existing: RecentJob[] = JSON.parse(localStorage.getItem('webharvest_recent_jobs') || '[]');
@@ -149,35 +157,28 @@ export default function Home() {
           {/* About Us Button */}
           <button
             onClick={() => setIsAboutOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-full bg-neutral-950 hover:bg-neutral-900 border border-neutral-800 text-sm font-medium text-neutral-300 hover:text-white transition-all duration-300 shadow-lg hover:scale-102 active:scale-98 cursor-pointer"
-            title="About WebHarvest architecture & tech stack"
+            className="px-3 py-1.5 rounded-full border border-neutral-800 bg-neutral-950/80 hover:bg-neutral-900 text-xs text-neutral-300 transition-colors flex items-center gap-1.5 cursor-pointer"
           >
-            <Info className="w-4 h-4 text-emerald-400" />
+            <Info className="w-3.5 h-3.5 text-emerald-400" />
             <span>About WebHarvest</span>
           </button>
 
+          {/* GitHub Star Button */}
           <a
             href="https://github.com/krishsoni15/WebHarvest"
             target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-3 px-4.5 py-2.5 rounded-full bg-neutral-950 hover:bg-neutral-900 border border-neutral-800 text-sm font-medium text-neutral-300 hover:text-white transition-all duration-300 shadow-lg hover:scale-102 active:scale-98 group"
+            rel="noreferrer"
+            className="px-3.5 py-1.5 rounded-full border border-neutral-800 bg-neutral-950/80 hover:bg-neutral-900 text-xs text-neutral-300 transition-colors flex items-center gap-2 cursor-pointer"
           >
-            <svg
-              className="w-5 h-5 fill-current text-neutral-400 group-hover:text-white transition-colors"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path
-                fillRule="evenodd"
-                clipRule="evenodd"
-                d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.483 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.579.688.481C19.137 20.162 22 16.418 22 12c0-5.523-4.477-10-10-10z"
-              />
+            <svg className="w-4 h-4 fill-white" viewBox="0 0 24 24">
+              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
             </svg>
-            <span className="font-semibold tracking-tight">GitHub</span>
-            <span className="h-4 w-px bg-neutral-800" />
-            <span className="flex items-center gap-1 text-amber-400 group-hover:text-amber-300 transition-colors font-mono font-bold text-sm">
-              <span className="text-[12px] select-none">★</span>{starCount !== null ? (starCount >= 1000 ? (starCount / 1000).toFixed(1) + 'k' : starCount) : '...'}
-            </span>
+            <span className="font-semibold text-white">GitHub</span>
+            {starCount !== null && (
+              <span className="text-neutral-500 text-[10px] font-mono border-l border-neutral-800 pl-2">
+                ★ {starCount}
+              </span>
+            )}
           </a>
         </div>
       </header>
@@ -185,16 +186,17 @@ export default function Home() {
       {/* Premium Top Radial Glow */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-gradient-to-b from-neutral-900/40 to-transparent rounded-full blur-3xl pointer-events-none" />
 
-      <main className="w-full max-w-2xl flex flex-col items-center text-center space-y-8 z-10 my-auto">
-        {/* Brand/Logo */}
-        <div className="flex flex-col items-center space-y-3">
-          <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-neutral-900 border border-neutral-800 shadow-inner">
-            <Globe className="w-7 h-7 text-white stroke-[1.5]" />
+      {/* Main Content Area */}
+      <main className="max-w-2xl w-full text-center space-y-8 z-10 pt-10">
+        {/* Hero Section */}
+        <div className="space-y-4">
+          <div className="inline-flex items-center justify-center p-3 rounded-2xl bg-neutral-900/80 border border-neutral-800 shadow-xl mb-2">
+            <Globe className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+          <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-white">
             WebHarvest
           </h1>
-          <p className="text-neutral-400 text-sm">
+          <p className="text-neutral-400 text-sm sm:text-base max-w-md mx-auto leading-relaxed font-normal">
             Paste any public website URL to capture & mirror
           </p>
         </div>
@@ -270,10 +272,22 @@ export default function Home() {
                         <p className="text-xs font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">
                           {job.hostname}
                         </p>
-                        <div className="flex items-center gap-1.5 text-[9px] text-emerald-400 font-mono mt-0.5">
-                          <CheckCircle2 className="w-2.5 h-2.5 text-emerald-500 shrink-0" />
-                          <span>100% Captured</span>
-                        </div>
+                        {job.status === 'downloading' ? (
+                          <div className="flex items-center gap-1.5 text-[9px] text-amber-400 font-mono mt-0.5 animate-pulse">
+                            <Loader2 className="w-2.5 h-2.5 text-amber-400 animate-spin shrink-0" />
+                            <span>Capturing in progress...</span>
+                          </div>
+                        ) : job.status === 'failed' ? (
+                          <div className="flex items-center gap-1.5 text-[9px] text-red-400 font-mono mt-0.5">
+                            <AlertTriangle className="w-2.5 h-2.5 text-red-500 shrink-0" />
+                            <span>Harvest Failed</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 text-[9px] text-emerald-400 font-mono mt-0.5">
+                            <CheckCircle2 className="w-2.5 h-2.5 text-emerald-500 shrink-0" />
+                            <span>100% Captured</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                     <ArrowRight className="w-4 h-4 text-neutral-600 group-hover:text-white group-hover:translate-x-1 transition-all shrink-0 mt-1" />

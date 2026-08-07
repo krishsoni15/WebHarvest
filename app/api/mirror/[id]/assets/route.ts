@@ -76,9 +76,15 @@ export async function GET(
             const ext = path.extname(cleanFile).toLowerCase();
             const rel = path.relative(targetDir, fullPath).replace(/\\/g, '/');
 
-            // Image/Video assets: filter out FontAwesome SVG fonts, loading circles, and tiny icons (< 2KB)
-            if (['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.mp4', '.webm', '.ogg', '.mov'].includes(ext)) {
+            const supportedExts = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.mp4', '.webm', '.ogg', '.mov', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.txt', '.zip'];
+
+            // Image, Video, PDF, and Document assets
+            if (supportedExts.includes(ext)) {
               const lowerName = file.toLowerCase();
+              const isPdf = ext === '.pdf';
+              const isDoc = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.txt', '.zip'].includes(ext);
+              const isVideo = ['.mp4', '.webm', '.ogg', '.mov'].includes(ext);
+
               const isSvgFont = ext === '.svg' && (
                 lowerName.includes('fa-') || 
                 lowerName.includes('solid') || 
@@ -89,7 +95,7 @@ export async function GET(
                 lowerName.includes('elementor')
               );
               
-              const isDecorationOrSpinner = stat.size < 2048 || (
+              const isDecorationOrSpinner = !isPdf && !isDoc && (stat.size < 2048 || (
                 lowerName.includes('arrow') ||
                 lowerName.includes('dots') ||
                 lowerName.includes('star') ||
@@ -98,15 +104,17 @@ export async function GET(
                 lowerName.includes('loader') ||
                 lowerName.includes('spinner') ||
                 lowerName.includes('ajax-')
-              );
+              ));
 
               if (!isSvgFont && !isDecorationOrSpinner) {
+                const type = isPdf ? 'pdf' : (isDoc ? 'document' : (isVideo ? 'video' : 'image'));
                 images.push({
                   name: file,
                   path: rel,
                   previewUrl: `/api/mirror/${id}/preview/${rel}`,
                   size: formatBytes(stat.size),
-                });
+                  type,
+                } as any);
               }
             }
 
