@@ -162,12 +162,11 @@ export default function MirrorDashboard() {
       const res = await fetch(`/api/mirror/${id}/logs`);
       if (res.ok) {
         const data = await res.json();
-        setCrawlLogs(data.logs || 'No logs recorded.');
-      } else {
-        setCrawlLogs('Failed to retrieve logs.');
+        if (data.logs && !data.logs.includes('Waiting for crawl process')) {
+          setCrawlLogs(data.logs);
+        }
       }
     } catch (err) {
-      setCrawlLogs('Error retrieving logs.');
     } finally {
       setLoadingLogs(false);
     }
@@ -500,8 +499,33 @@ export default function MirrorDashboard() {
   };
 
   // Helper to trigger ZIP download
-  const handleDownloadZip = () => {
-    window.location.href = `/api/download/${id}`;
+  const handleDownloadZip = async () => {
+    try {
+      const res = await fetch(`/api/download/${id}`, { method: 'HEAD' });
+      if (res.ok) {
+        window.location.href = `/api/download/${id}`;
+        return;
+      }
+    } catch {}
+
+    // Fallback for Vercel Serverless: client-side JSZip generation
+    if (previewHtml) {
+      try {
+        const JSZip = (await import('jszip')).default;
+        const zip = new JSZip();
+        zip.file('index.html', previewHtml);
+        if (crawlLogs) zip.file('crawl_logs.txt', crawlLogs);
+        const content = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(content);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${jobHostname || 'webharvest'}-mirror-${id}.zip`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      } catch (err) {
+        console.error('Client zip generation failed:', err);
+      }
+    }
   };
 
   // Files recursive tree explorer component

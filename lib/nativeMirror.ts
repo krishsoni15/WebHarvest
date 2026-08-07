@@ -159,7 +159,7 @@ export async function runNativeMirror(id: string, url: string, hostname: string,
     fs.writeFileSync(path.join(targetDir, 'index.html'), html, 'utf-8');
     appendLog(`[WRITE] Saved index.html with relative link rewrites`);
 
-    // Fetch assets concurrently (max 15 assets)
+    // Fetch assets concurrently (max 30 static resources)
     appendLog(`[ASSETS] Fetching ${assetsToFetch.length} static resources...`);
     const fetchAssetPromises = assetsToFetch.slice(0, 30).map(async (asset) => {
       try {
@@ -174,6 +174,14 @@ export async function runNativeMirror(id: string, url: string, hostname: string,
           const buffer = Buffer.from(await res.arrayBuffer());
           fs.writeFileSync(asset.localPath, buffer);
           appendLog(`[ASSET SUCCESS] Downloaded ${asset.relPath}`);
+
+          // Inline images into HTML data URIs for 100% self-contained serverless preview
+          if (asset.relPath.startsWith('images/') && buffer.length < 500000) {
+            const ext = path.extname(asset.localPath).toLowerCase().replace('.', '');
+            const mimeType = ext === 'svg' ? 'image/svg+xml' : (ext === 'webp' ? 'image/webp' : (ext === 'png' ? 'image/png' : (ext === 'gif' ? 'image/gif' : 'image/jpeg')));
+            const dataUri = `data:${mimeType};base64,${buffer.toString('base64')}`;
+            html = html.replaceAll(`./${asset.relPath}`, dataUri);
+          }
         }
       } catch (e: any) {
         appendLog(`[ASSET WARN] Skipped ${asset.relPath}: ${e.message}`);
@@ -181,6 +189,10 @@ export async function runNativeMirror(id: string, url: string, hostname: string,
     });
 
     await Promise.allSettled(fetchAssetPromises);
+
+    // Save final self-contained HTML index
+    fs.writeFileSync(path.join(targetDir, 'index.html'), html, 'utf-8');
+    appendLog(`[WRITE] Saved index.html with inline asset data URIs`);
 
     appendLog(`[SUCCESS] Website harvest completed successfully! Target ready for offline preview.`);
     updateJobState('completed');
