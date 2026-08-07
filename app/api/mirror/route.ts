@@ -148,8 +148,8 @@ export async function POST(req: NextRequest) {
 
     if (isServerless) {
       // Execute high-speed native Node mirroring for Vercel
-      await runNativeMirror(id, url, resolvedHostname, downloadDir);
-      return NextResponse.json({ id });
+      const result = await runNativeMirror(id, url, resolvedHostname, downloadDir);
+      return NextResponse.json(result);
     }
 
     // Spawn wget background process locally

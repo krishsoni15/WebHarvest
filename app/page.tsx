@@ -124,12 +124,23 @@ export default function Home() {
           id: data.id,
           url: formattedUrl,
           hostname: host,
-          status: 'downloading',
+          status: data.status || 'completed',
+          techStack: data.techStack,
+          size: data.stats?.size,
+          pages: data.stats?.pages,
+          images: data.stats?.images,
+          files: data.stats?.files,
           addedAt: Date.now(),
         };
         const existing: RecentJob[] = JSON.parse(localStorage.getItem('webharvest_recent_jobs') || '[]');
         const updated = [newJob, ...existing.filter((j) => j.id !== data.id)].slice(0, 6);
         localStorage.setItem('webharvest_recent_jobs', JSON.stringify(updated));
+
+        // Save complete mirror job state for serverless hydration
+        localStorage.setItem(`webharvest_job_${data.id}`, JSON.stringify({
+          ...newJob,
+          ...data,
+        }));
       } catch {}
 
       router.push(`/mirror/${data.id}`);

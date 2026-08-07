@@ -184,8 +184,59 @@ export async function runNativeMirror(id: string, url: string, hostname: string,
 
     appendLog(`[SUCCESS] Website harvest completed successfully! Target ready for offline preview.`);
     updateJobState('completed');
+
+    // Build return payload for serverless function callers
+    const fullLogs = fs.existsSync(logFilePath) ? fs.readFileSync(logFilePath, 'utf-8') : '';
+    
+    let techStack = 'Static HTML/CSS';
+    if (/wp-content|wp-includes/i.test(html)) techStack = 'WordPress';
+    else if (/cdn\.shopify\.com/i.test(html)) techStack = 'Shopify';
+    else if (/wix\.com|_wix/i.test(html)) techStack = 'Wix';
+    else if (/squarespace\.com/i.test(html)) techStack = 'Squarespace';
+    else if (/webflow\.com|data-wf-page/i.test(html)) techStack = 'Webflow';
+    else if (/_next\/static|__next|next\.js/i.test(html)) techStack = 'Next.js (React)';
+    else if (/vue\.js|nuxt|__nuxt/i.test(html)) techStack = 'Vue.js / Nuxt';
+    else if (/ng-version|angular/i.test(html)) techStack = 'Angular';
+    else if (/tailwindcss|tailwind/i.test(html)) techStack = 'Tailwind CSS';
+    else if (/react/i.test(html)) techStack = 'React';
+
+    const totalFiles = assetsToFetch.length + 1;
+    const totalBytes = Buffer.byteLength(html, 'utf-8') + assetsToFetch.length * 15000;
+
+    return {
+      id,
+      url,
+      hostname,
+      status: 'completed' as const,
+      logs: fullLogs,
+      html,
+      stats: {
+        pages: 1,
+        images: imgIdx,
+        files: totalFiles,
+        size: formatBytes(totalBytes),
+      },
+      techStack,
+    };
   } catch (err: any) {
     appendLog(`[ERROR] Mirroring failed: ${err.message}`);
     updateJobState('failed', err.message || 'Failed to harvest website');
+    const fullLogs = fs.existsSync(logFilePath) ? fs.readFileSync(logFilePath, 'utf-8') : err.message;
+    return {
+      id,
+      url,
+      hostname,
+      status: 'failed' as const,
+      error: err.message || 'Failed to harvest website',
+      logs: fullLogs,
+    };
   }
+}
+
+function formatBytes(bytes: number) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }

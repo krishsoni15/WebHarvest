@@ -112,6 +112,27 @@ export default function MirrorDashboard() {
   const [copiedLogs, setCopiedLogs] = useState(false);
   const [isAssetsDrawerOpen, setIsAssetsDrawerOpen] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [previewHtml, setPreviewHtml] = useState<string>('');
+
+  // Hydrate state from localStorage if available (Vercel Serverless optimization)
+  useEffect(() => {
+    if (!id) return;
+    try {
+      const saved = localStorage.getItem(`webharvest_job_${id}`);
+      if (saved) {
+        const data = JSON.parse(saved);
+        if (data.status) setStatus(data.status);
+        if (data.hostname) setJobHostname(data.hostname);
+        if (data.url) setJobUrl(data.url);
+        if (data.logs) setCrawlLogs(data.logs);
+        if (data.stats) setOverviewData(data);
+        if (data.assets) setAssets(data.assets);
+        if (data.fileTree) setFileTree(data.fileTree);
+        if (data.html) setPreviewHtml(data.html);
+        if (data.status === 'completed') setLoadingProgress(100);
+      }
+    } catch {}
+  }, [id]);
 
   const handleCopyLogs = () => {
     if (!crawlLogs) return;
@@ -789,6 +810,7 @@ export default function MirrorDashboard() {
                           <iframe
                             id="preview-iframe"
                             src={`/api/mirror/${id}/preview/${previewPath}`}
+                            srcDoc={previewHtml || undefined}
                             onLoad={handleIframeLoad}
                             className="w-full h-full bg-white border-0"
                           />
