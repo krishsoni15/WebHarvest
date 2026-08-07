@@ -49,12 +49,13 @@ export default function Home() {
               const res = await fetch(`/api/mirror/${job.id}/overview`);
               if (res.ok) {
                 const data = await res.json();
+                const isFinished = data.status === 'completed' || Boolean(data.stats?.size) || (data.stats?.pages !== undefined && data.stats.pages > 0);
                 setRecentJobs((prev) =>
                   prev.map((j) =>
                     j.id === job.id
                       ? {
                           ...j,
-                          status: data.status,
+                          status: isFinished ? 'completed' : (data.status || j.status),
                           techStack: data.techStack,
                           size: data.stats?.size,
                           pages: data.stats?.pages,
@@ -283,7 +284,7 @@ export default function Home() {
                         <p className="text-xs font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">
                           {job.hostname}
                         </p>
-                        {job.status === 'downloading' ? (
+                        {job.status === 'downloading' && (!job.size && (!job.pages || job.pages === 0)) ? (
                           <div className="flex items-center gap-1.5 text-[9px] text-amber-400 font-mono mt-0.5 animate-pulse">
                             <Loader2 className="w-2.5 h-2.5 text-amber-400 animate-spin shrink-0" />
                             <span>Capturing in progress...</span>
