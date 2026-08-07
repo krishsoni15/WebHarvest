@@ -256,7 +256,7 @@ export default function MirrorDashboard() {
     return () => clearInterval(interval);
   }, [id, status]);
 
-  // Simulated progress logic for download phase
+  // Realistic progress logic for download phase (capped at 98% until completed)
   useEffect(() => {
     if (status !== 'downloading') {
       if (status === 'completed') {
@@ -267,12 +267,12 @@ export default function MirrorDashboard() {
 
     const interval = setInterval(() => {
       setLoadingProgress((prev) => {
-        if (prev >= 95) return prev;
-        const remaining = 95 - prev;
-        const step = Math.max(1, Math.floor(remaining * 0.15));
-        return prev + step;
+        if (prev >= 98) return 98;
+        const remaining = 98 - prev;
+        const step = Math.max(1, Math.floor(remaining * 0.08));
+        return Math.min(98, prev + step);
       });
-    }, 1500);
+    }, 1200);
 
     return () => clearInterval(interval);
   }, [status]);
