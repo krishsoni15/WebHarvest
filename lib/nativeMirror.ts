@@ -58,16 +58,13 @@ export async function runNativeMirror(id: string, url: string, hostname: string,
     const cssDir = path.join(targetDir, 'css');
     const jsDir = path.join(targetDir, 'js');
     const imgDir = path.join(targetDir, 'images');
+    const fontsDir = path.join(targetDir, 'fonts');
     fs.mkdirSync(cssDir, { recursive: true });
     fs.mkdirSync(jsDir, { recursive: true });
     fs.mkdirSync(imgDir, { recursive: true });
+    fs.mkdirSync(fontsDir, { recursive: true });
 
-    // Extract asset URLs using regex
-    const cssRegex = /<link[^>]+rel=["']stylesheet["'][^>]+href=["']([^"']+)["']/gi;
-    const scriptRegex = /<script[^>]+src=["']([^"']+)["']/gi;
-    const imgRegex = /<img[^>]+src=["']([^"']+)["']/gi;
-
-    const assetsToFetch: { url: string; type: 'css' | 'js' | 'img'; localPath: string; relPath: string }[] = [];
+    const assetsToFetch: { url: string; type: 'css' | 'js' | 'img' | 'font'; localPath: string; relPath: string }[] = [];
 
     const baseUrl = new URL(url);
 
@@ -79,8 +76,10 @@ export async function runNativeMirror(id: string, url: string, hostname: string,
       }
     };
 
-    // Extract CSS
     let match;
+
+    // 1. Extract CSS stylesheets
+    const cssRegex = /<link[^>]+rel=["']stylesheet["'][^>]+href=["']([^"']+)["']/gi;
     let cssIdx = 0;
     while ((match = cssRegex.exec(html)) !== null) {
       const fullUrl = resolveUrl(match[1]);
@@ -97,13 +96,15 @@ export async function runNativeMirror(id: string, url: string, hostname: string,
       }
     }
 
-    // Extract JS
+    // 2. Extract JS Scripts & Next.js / React Chunks
+    const scriptRegex = /<script[^>]+src=["']([^"']+)["']/gi;
     let jsIdx = 0;
     while ((match = scriptRegex.exec(html)) !== null) {
       const fullUrl = resolveUrl(match[1]);
       if (fullUrl && !fullUrl.startsWith('data:')) {
         jsIdx++;
-        const filename = `script_${jsIdx}.js`;
+        const isNextChunk = match[1].includes('_next/static') || match[1].includes('chunk');
+        const filename = isNextChunk ? `next_chunk_${jsIdx}.js` : `script_${jsIdx}.js`;
         assetsToFetch.push({
           url: fullUrl,
           type: 'js',
@@ -114,7 +115,44 @@ export async function runNativeMirror(id: string, url: string, hostname: string,
       }
     }
 
-    // Extract Images
+    // 3. Extract Preloaded Next.js Scripts, Fonts, and Styles (<link rel="preload|modulepreload|prefetch">)
+    const preloadRegex = /<link[^>]+href=["']([^"']+)["'][^>]*rel=["'](?:preload|modulepreload|prefetch)["']/gi;
+    let preloadIdx = 0;
+    while ((match = preloadRegex.exec(html)) !== null) {
+      const fullUrl = resolveUrl(match[1]);
+      if (fullUrl && !fullUrl.startsWith('data:')) {
+        preloadIdx++;
+        const ext = path.extname(new URL(fullUrl).pathname).toLowerCase();
+        let folder = jsDir;
+        let relFolder = 'js';
+        let prefix = 'preload_chunk';
+        let assetType: 'js' | 'css' | 'font' = 'js';
+
+        if (['.woff', '.woff2', '.ttf', '.otf', '.eot'].includes(ext)) {
+          folder = fontsDir;
+          relFolder = 'fonts';
+          prefix = 'font';
+          assetType = 'font';
+        } else if (ext === '.css') {
+          folder = cssDir;
+          relFolder = 'css';
+          prefix = 'preload_style';
+          assetType = 'css';
+        }
+
+        const filename = `${prefix}_${preloadIdx}${ext || '.js'}`;
+        assetsToFetch.push({
+          url: fullUrl,
+          type: assetType,
+          localPath: path.join(folder, filename),
+          relPath: `${relFolder}/${filename}`,
+        });
+        html = html.replace(match[1], `./${relFolder}/${filename}`);
+      }
+    }
+
+    // 4. Extract Images & Next.js <Image> src
+    const imgRegex = /<img[^>]+src=["']([^"']+)["']/gi;
     let imgIdx = 0;
     while ((match = imgRegex.exec(html)) !== null) {
       const fullUrl = resolveUrl(match[1]);
@@ -132,7 +170,63 @@ export async function runNativeMirror(id: string, url: string, hostname: string,
       }
     }
 
-    // Extract PDFs & Documents
+    // 5. Extract Next.js / React srcset attributes (<img> & <source>)
+    const srcsetRegex = /srcset=["']([^"']+)["']/gi;
+    while ((match = srcsetRegex.exec(html)) !== null) {
+      const rawSrcset = match[1];
+      const parts = rawSrcset.split(',').map(s => s.trim());
+      let newSrcsetParts: string[] = [];
+
+      for (const part of parts) {
+        const [candidateUrl, descriptor] = part.split(/\s+/);
+        if (candidateUrl && !candidateUrl.startsWith('data:')) {
+          const fullUrl = resolveUrl(candidateUrl);
+          if (fullUrl) {
+            imgIdx++;
+            const ext = path.extname(new URL(fullUrl).pathname) || '.png';
+            const filename = `srcset_img_${imgIdx}${ext.split('?')[0]}`;
+            assetsToFetch.push({
+              url: fullUrl,
+              type: 'img',
+              localPath: path.join(imgDir, filename),
+              relPath: `images/${filename}`,
+            });
+            newSrcsetParts.push(`./images/${filename}${descriptor ? ' ' + descriptor : ''}`);
+          } else {
+            newSrcsetParts.push(part);
+          }
+        } else {
+          newSrcsetParts.push(part);
+        }
+      }
+
+      if (newSrcsetParts.length > 0) {
+        html = html.replace(rawSrcset, newSrcsetParts.join(', '));
+      }
+    }
+
+    // 6. Extract inline background images style="url(...)"
+    const bgUrlRegex = /url\(["']?([^"')\s]+\.(?:png|jpg|jpeg|webp|gif|svg))["']?\)/gi;
+    while ((match = bgUrlRegex.exec(html)) !== null) {
+      const rawUrl = match[1];
+      if (!rawUrl.startsWith('data:')) {
+        const fullUrl = resolveUrl(rawUrl);
+        if (fullUrl) {
+          imgIdx++;
+          const ext = path.extname(new URL(fullUrl).pathname) || '.png';
+          const filename = `bg_img_${imgIdx}${ext.split('?')[0]}`;
+          assetsToFetch.push({
+            url: fullUrl,
+            type: 'img',
+            localPath: path.join(imgDir, filename),
+            relPath: `images/${filename}`,
+          });
+          html = html.replace(rawUrl, `./images/${filename}`);
+        }
+      }
+    }
+
+    // 7. Extract PDFs & Documents
     const docsDir = path.join(targetDir, 'docs');
     fs.mkdirSync(docsDir, { recursive: true });
     const docLinkRegex = /<(?:a|iframe|embed|object)[^>]+(?:href|src|data)=["']([^"']+\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|csv|txt|zip)(?:\?[^"']*)?)["']/gi;
@@ -147,7 +241,7 @@ export async function runNativeMirror(id: string, url: string, hostname: string,
         const filename = `${baseName}_${docIdx}${cleanExt}`;
         assetsToFetch.push({
           url: fullUrl,
-          type: 'img', // queued for asset fetcher
+          type: 'img',
           localPath: path.join(docsDir, filename),
           relPath: `docs/${filename}`,
         });
