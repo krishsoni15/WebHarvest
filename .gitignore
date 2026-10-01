@@ -42,7 +42,13 @@ next-env.d.ts
 
 # local mirror downloads and logs
 /tmp/
+/downloads/
+/.downloads/
 wget-log*
+
+# sqlite database files
+/data/*.db*
+/data/*.sqlite*
 
 # local agent/ide rules
 CLAUDE.md

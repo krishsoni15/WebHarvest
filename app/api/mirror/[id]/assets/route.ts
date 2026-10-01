@@ -76,46 +76,47 @@ export async function GET(
             const ext = path.extname(cleanFile).toLowerCase();
             const rel = path.relative(targetDir, fullPath).replace(/\\/g, '/');
 
-            const supportedExts = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.mp4', '.webm', '.ogg', '.mov', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.txt', '.zip'];
+            const SYSTEM_IGNORED = [
+              'crawl_logs.txt', 'job.json', 'report.json', 'package.json', 'package-lock.json',
+              'server.js', 'serve.py', 'start.sh', 'start.bat', 'auth_state.json', 'manifest.json', 'readme.md'
+            ];
+            if (SYSTEM_IGNORED.includes(file.toLowerCase())) continue;
 
-            // Image, Video, PDF, and Document assets
-            if (supportedExts.includes(ext)) {
-              const lowerName = file.toLowerCase();
-              const isPdf = ext === '.pdf';
-              const isDoc = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.txt', '.zip'].includes(ext);
-              const isVideo = ['.mp4', '.webm', '.ogg', '.mov'].includes(ext);
+            const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.avif'];
+            const svgExts = ['.svg'];
+            const fontExts = ['.woff', '.woff2', '.ttf', '.otf', '.eot'];
+            const cssExts = ['.css'];
+            const jsExts = ['.js', '.mjs'];
+            const videoExts = ['.mp4', '.webm', '.ogg', '.mov'];
+            const audioExts = ['.mp3', '.wav', '.aac', '.flac'];
+            const docExts = ['.pdf'];
 
-              const isSvgFont = ext === '.svg' && (
-                lowerName.includes('fa-') || 
-                lowerName.includes('solid') || 
-                lowerName.includes('regular') || 
-                lowerName.includes('brands') || 
-                lowerName.includes('glyph') || 
-                lowerName.includes('font') || 
-                lowerName.includes('elementor')
-              );
-              
-              const isDecorationOrSpinner = !isPdf && !isDoc && (stat.size < 2048 || (
-                lowerName.includes('arrow') ||
-                lowerName.includes('dots') ||
-                lowerName.includes('star') ||
-                lowerName.includes('bullet') ||
-                lowerName.includes('checkbox') ||
-                lowerName.includes('loader') ||
-                lowerName.includes('spinner') ||
-                lowerName.includes('ajax-')
-              ));
+            const isImage = imageExts.includes(ext);
+            const isSvg = svgExts.includes(ext);
+            const isFont = fontExts.includes(ext);
+            const isCss = cssExts.includes(ext);
+            const isJs = jsExts.includes(ext);
+            const isVideo = videoExts.includes(ext);
+            const isAudio = audioExts.includes(ext);
+            const isDoc = docExts.includes(ext);
 
-              if (!isSvgFont && !isDecorationOrSpinner) {
-                const type = isPdf ? 'pdf' : (isDoc ? 'document' : (isVideo ? 'video' : 'image'));
-                images.push({
-                  name: file,
-                  path: rel,
-                  previewUrl: `/api/mirror/${id}/preview/${rel}`,
-                  size: formatBytes(stat.size),
-                  type,
-                } as any);
-              }
+            if (isImage || isSvg || isFont || isCss || isJs || isVideo || isAudio || isDoc) {
+              const type = isImage ? 'image'
+                : isSvg ? 'svg'
+                : isFont ? 'font'
+                : isCss ? 'css'
+                : isJs ? 'js'
+                : isVideo ? 'video'
+                : isAudio ? 'audio'
+                : 'document';
+
+              images.push({
+                name: file,
+                path: rel,
+                previewUrl: `/api/mirror/${id}/preview/${rel}`,
+                size: formatBytes(stat.size),
+                type,
+              } as any);
             }
 
             // Extract colors from CSS and HTML files (max 500KB)

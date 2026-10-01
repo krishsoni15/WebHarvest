@@ -8,6 +8,12 @@ import { getBaseDownloadDir } from '@/lib/resolveDir';
 import { runNativeMirror } from '@/lib/nativeMirror';
 import { runAuthCrawler } from '@/lib/authCrawler';
 
+import { validateURL } from '@/lib/security/validate-url';
+import { dnsGuard } from '@/lib/security/dns-guard';
+import { defaultRateLimiter } from '@/lib/security/rate-limit';
+import { JobManager } from '@/lib/jobs/manager';
+import { CAPTURE_PRESETS } from '@/lib/crawler/presets';
+
 // Rate limiting: max concurrent downloads
 const MAX_CONCURRENT_JOBS = 5;
 
@@ -78,17 +84,22 @@ export async function POST(req: NextRequest) {
       url = 'https://' + url;
     }
 
-    // Automatically map Vuexy marketing URLs (e.g. https://pixinvent.com/vuexy-vuetify-vuejs-admin-template)
-    // to the live template demo application on demos.pixinvent.com with all 9 apps & dashboards
-    if (url.toLowerCase().includes('pixinvent.com') && url.toLowerCase().includes('vuexy') && !url.toLowerCase().includes('demos.pixinvent.com')) {
-      if (url.toLowerCase().includes('nextjs')) {
-        url = 'https://demos.pixinvent.com/vuexy-nextjs-admin-template/demo-1/dashboards/analytics';
-      } else if (url.toLowerCase().includes('html')) {
-        url = 'https://demos.pixinvent.com/vuexy-html-admin-template/html/vertical-menu-template/dashboards-analytics.html';
-      } else {
-        url = 'https://demos.pixinvent.com/vuexy-vuejs-admin-template/demo-1/dashboards/analytics';
-      }
+    // Rate limiting: per-IP token bucket
+    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || '127.0.0.1';
+    const rateStatus = defaultRateLimiter.consume(clientIp);
+    if (!rateStatus.allowed) {
+      return NextResponse.json(
+        { error: `Too many requests. Please retry in ${rateStatus.retryAfterSeconds} seconds.` },
+        { status: 429 }
+      );
     }
+
+    // Comprehensive URL validation
+    const urlCheck = validateURL(url);
+    if (!urlCheck.valid || !urlCheck.url) {
+      return NextResponse.json({ error: urlCheck.reason || 'Invalid URL' }, { status: 400 });
+    }
+    url = urlCheck.url;
 
     // Validate URL format
     let parsedUrl: URL;
@@ -104,7 +115,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Cannot mirror local or private network addresses' }, { status: 400 });
     }
 
-    // Rate limiting: check concurrent job count
+    // DNS SSRF Guard
+    const dnsCheck = await dnsGuard(hostname);
+    if (!dnsCheck.allowed) {
+      return NextResponse.json({ error: `Security check blocked: ${dnsCheck.reason}` }, { status: 403 });
+    }
+
+    // Clean up stale in-memory downloading jobs older than 3 minutes that have no active process
+    const now = Date.now();
+    for (const [jid, j] of activeJobs.entries()) {
+      if (j.status === 'downloading' && now - j.addedAt > 180000 && !activeProcesses.has(jid)) {
+        j.status = 'completed';
+        activeJobs.set(jid, j);
+      }
+    }
+
+    // Rate limiting: check concurrent active job count
     const activeCount = Array.from(activeJobs.values()).filter(j => j.status === 'downloading').length;
     if (activeCount >= MAX_CONCURRENT_JOBS) {
       return NextResponse.json({ error: `Server busy: ${activeCount} mirrors in progress. Please try again shortly.` }, { status: 429 });
@@ -166,12 +192,11 @@ export async function POST(req: NextRequest) {
       !!body.authCrawler;
 
     if (isVuexyOrSpa) {
-      const isUnlimited = body.maxPages === 0 || body.maxPages >= 99999;
+      const requestedLimit = body.limits?.maxPages ?? body.maxPages ?? 10000;
+      const isUnlimited = requestedLimit === 0 || requestedLimit >= 50000;
       const maxPages = isUnlimited 
-        ? 100000 
-        : typeof body.maxPages === 'number' && body.maxPages > 0 
-          ? Math.max(body.maxPages, 5) 
-          : 500;
+        ? 50000 
+        : Math.max(requestedLimit, 1000);
       runAuthCrawler({
         id,
         targetUrl: url,
@@ -181,8 +206,54 @@ export async function POST(req: NextRequest) {
       }).catch(err => {
         console.error("Auth crawler background error:", err);
       });
-
       return NextResponse.json({ id });
+    }
+
+    // V3 Capture Engine Route when preset, scope, auth, or mode is specified
+    if (body.preset || body.scope || body.scopeConfig || body.captureRules || body.authProfileId || body.authSessionId || body.mode) {
+      let mode = body.mode || 'auto';
+      let scopeConfig = body.scopeConfig || body.scope || {};
+      let captureRules = body.captureRules;
+      let limits = body.limits || {};
+
+      if (body.preset && CAPTURE_PRESETS[body.preset]) {
+        const p = CAPTURE_PRESETS[body.preset];
+        mode = body.mode || p.engine;
+        scopeConfig = {
+          mode: p.scopeMode,
+          maxDepth: p.maxDepth,
+          ...scopeConfig,
+        };
+        captureRules = {
+          ...p.captureRules,
+          ...(captureRules || {}),
+        };
+        limits = {
+          maxPages: p.maxPages,
+          maxDepth: p.maxDepth,
+          ...limits,
+        };
+      }
+
+      const jobRecord = await JobManager.createJob({
+        url,
+        mode,
+        scopeConfig,
+        captureRules,
+        limits,
+        authProfileId: body.authProfileId,
+        authSessionId: body.authSessionId,
+      });
+
+      activeJobs.set(jobRecord.id, {
+        id: jobRecord.id,
+        url: jobRecord.url,
+        hostname: jobRecord.hostname,
+        status: 'downloading',
+        addedAt: jobRecord.created_at,
+      });
+
+      return NextResponse.json({ id: jobRecord.id });
     }
 
     const isServerless = !!(process.env.VERCEL || process.env.NOW_BUILDER);
@@ -232,10 +303,10 @@ export async function POST(req: NextRequest) {
 
     const timeout = setTimeout(() => {
       if (activeProcesses.has(id)) {
-        console.log(`[TIMEOUT] Mirroring job ${id} exceeded 300s limit. Terminating wget.`);
+        console.log(`[TIMEOUT] Mirroring job ${id} exceeded 1200s limit. Terminating wget.`);
         wgetProcess.kill('SIGTERM');
       }
-    }, 300000); // 5 minutes overall timeout limit
+    }, 1200000); // 20 minutes overall timeout limit
 
     activeProcesses.set(id, wgetProcess);
 

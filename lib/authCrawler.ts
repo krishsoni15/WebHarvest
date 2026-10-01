@@ -29,9 +29,9 @@ export function resolveVuexyConfig(inputUrl: string) {
   // to the live template demo domain so that the crawler targets the actual applications
   const isMarketingUrl = (parsed.hostname === 'pixinvent.com' || parsed.hostname === 'www.pixinvent.com');
   const pathname = parsed.pathname.toLowerCase();
-  const isVuejs = pathname.includes('vuejs') || pathname.includes('vuetify') || inputUrl.toLowerCase().includes('vuexy-vuetify') || inputUrl.toLowerCase().includes('vuexy-vuejs');
-  const isNextjs = pathname.includes('nextjs');
-  const isHtml = pathname.includes('html');
+  let isNextjs = pathname.includes('nextjs') || inputUrl.toLowerCase().includes('nextjs');
+  let isHtml = pathname.includes('html') || inputUrl.toLowerCase().includes('html');
+  let isVuejs = pathname.includes('vuejs') || pathname.includes('vuetify') || inputUrl.toLowerCase().includes('vuexy') || inputUrl.toLowerCase().includes('pixinvent') || (!isNextjs && !isHtml);
 
   if (isMarketingUrl) {
     if (isNextjs) {
@@ -40,7 +40,12 @@ export function resolveVuexyConfig(inputUrl: string) {
       parsed = new URL('https://demos.pixinvent.com/vuexy-html-admin-template/html/vertical-menu-template/dashboards-analytics.html');
     } else {
       parsed = new URL('https://demos.pixinvent.com/vuexy-vuejs-admin-template/demo-1/dashboards/analytics');
+      isVuejs = true;
     }
+  }
+
+  if (!isNextjs && !isHtml) {
+    isVuejs = true;
   }
 
   // Detect active demo (default demo-1)
@@ -278,12 +283,11 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
   const loginUrl = options.loginUrl || autoConfig.loginUrl;
   const email = options.email || autoConfig.email;
   const password = options.password || autoConfig.password;
-  const initialPages = (options.targetPages && options.targetPages.length > 0) ? options.targetPages : autoConfig.targetPages;
+  const initialPages = (options.targetPages && options.targetPages.length > 0)
+    ? options.targetPages
+    : (targetUrl ? [targetUrl, ...autoConfig.targetPages.filter(p => p !== targetUrl)] : autoConfig.targetPages);
 
   let effectiveTargetUrl = targetUrl || loginUrl;
-  if (effectiveTargetUrl.includes('pixinvent.com') && !effectiveTargetUrl.includes('demos.pixinvent.com')) {
-    effectiveTargetUrl = initialPages[0] || 'https://demos.pixinvent.com/vuexy-vuejs-admin-template/demo-1/dashboards/analytics';
-  }
 
   let parsedUrl: URL;
   try {
@@ -321,7 +325,7 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
 
   try {
     fs.mkdirSync(targetDir, { recursive: true });
-    appendLog(`[START] WebHarvest Advanced 500-Page Full-Site Harvester initialized`);
+    appendLog(`[START] WebHarvest Deep Full-Site Harvester initialized`);
     appendLog(`[TARGET] Primary Entrypoint: ${targetUrl || loginUrl}`);
     appendLog(`[CONFIG] Auth Portal: ${loginUrl}`);
     appendLog(`[LIMITS] Target Page Limit: ${maxPages >= 50000 ? 'Unlimited (All Pages)' : `${maxPages} pages`} | Multi-Asset Offline Bundle Enabled`);
@@ -343,14 +347,19 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-web-security',
+        '--disable-blink-features=AutomationControlled',
         '--disable-features=IsolateOrigins,site-per-process'
       ]
     });
 
     try {
       const context = await browser.newContext({
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
         viewport: { width: 1440, height: 900 }
+      });
+
+      await context.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
       });
 
       const page = await context.newPage();
@@ -459,10 +468,17 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
           const submitBtn = await page.$(submitSelector);
           if (submitBtn) {
             appendLog(`[AUTH] Submitting login form`);
-            await Promise.all([
-              page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {}),
-              submitBtn.click().catch(() => {})
-            ]);
+            await submitBtn.click().catch(() => {});
+
+            // Wait until NextAuth sets session cookie and redirects to dashboard
+            for (let i = 0; i < 20; i++) {
+              await page.waitForTimeout(500);
+              const cookies = await context.cookies();
+              const hasToken = cookies.some((c: any) =>
+                c.name.includes('session-token') || c.name.includes('session')
+              );
+              if (hasToken && !page.url().includes('/login')) break;
+            }
             await page.waitForTimeout(1500);
             appendLog(`[AUTH] Logged in successfully. Current URL: ${page.url()}`);
           }
@@ -743,7 +759,90 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
  * - start.sh & start.bat: 1-click launch scripts for Linux, macOS & Windows
  * - README.md: Clear offline running instructions
  */
-export function createCompleteRunnableBundle(targetDir: string, downloadDir: string, hostname: string) {
+export interface RunnableBundleOptions {
+  url?: string;
+  totalSize?: string;
+  pagesCount?: number;
+  assetsCount?: number;
+  techStack?: string;
+  htmlPages?: string[];
+}
+
+export function createCompleteRunnableBundle(
+  targetDir: string,
+  downloadDir: string,
+  hostname: string,
+  options?: RunnableBundleOptions
+) {
+  // Auto-discover stats if not explicitly passed
+  let discoveredPages: string[] = options?.htmlPages ? [...options.htmlPages] : [];
+  let discoveredSize = options?.totalSize || '';
+  let discoveredPagesCount = options?.pagesCount || 0;
+  let discoveredAssetsCount = options?.assetsCount || 0;
+  let discoveredTechStack = options?.techStack || 'HTML5, CSS3, Modern Web Components';
+  const sourceUrl = options?.url || `https://${hostname}`;
+
+  try {
+    const reportPath = path.join(downloadDir, 'report.json');
+    if (fs.existsSync(reportPath)) {
+      const rep = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+      if (rep.totalSizeFormatted && !discoveredSize) discoveredSize = rep.totalSizeFormatted;
+      if (rep.pagesCount && !discoveredPagesCount) discoveredPagesCount = rep.pagesCount;
+      if (rep.assetsCount && !discoveredAssetsCount) discoveredAssetsCount = rep.assetsCount;
+      if (rep.techStack && discoveredTechStack.includes('Modern Web')) discoveredTechStack = rep.techStack;
+    }
+  } catch {}
+
+  try {
+    const manifestPath = path.join(downloadDir, 'manifest.json');
+    if (fs.existsSync(manifestPath)) {
+      const man = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      if (man.stats?.totalSize && !discoveredSize) {
+        const bytes = man.stats.totalSize;
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        discoveredSize = parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+      }
+      if (man.stats?.totalFiles && !discoveredAssetsCount) {
+        discoveredAssetsCount = man.stats.totalFiles;
+      }
+    }
+  } catch {}
+
+  // Scan targetDir for pages if discoveredPages is empty
+  if (discoveredPages.length === 0) {
+    function scanPages(dir: string, base: string = '') {
+      try {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.name.startsWith('.')) continue;
+          const rel = base ? `${base}/${entry.name}` : entry.name;
+          if (entry.isFile() && (entry.name.endsWith('.html') || entry.name.endsWith('.htm'))) {
+            discoveredPages.push(rel);
+          } else if (entry.isDirectory() && discoveredPages.length < 50) {
+            scanPages(path.join(dir, entry.name), rel);
+          }
+        }
+      } catch {}
+    }
+    scanPages(targetDir);
+  }
+
+  if (!discoveredPagesCount) discoveredPagesCount = discoveredPages.length || 1;
+  if (!discoveredSize) discoveredSize = 'Captured Archive Bundle';
+
+  const pagesRows = discoveredPages.slice(0, 25).map((p, idx) => {
+    const cleanName = p.replace(/\.html$/i, '').split('/').pop() || 'Home';
+    return `| ${idx + 1} | \`${p}\` | ${cleanName.charAt(0).toUpperCase() + cleanName.slice(1)} | [Open Locally](/${p}) |`;
+  }).join('\n');
+
+  const pagesTable = discoveredPages.length > 0
+    ? `| # | Local File Path | Page Title / Route | Direct Link |
+| :-: | :--- | :--- | :--- |
+${pagesRows}${discoveredPages.length > 25 ? `\n\n*... and ${discoveredPages.length - 25} more captured subpages.*` : ''}`
+    : `*All captured assets are bundled under root directory.*`;
+
   // 1. Zero-dependency Node.js Standalone Server (server.js)
   const serverJsContent = `#!/usr/bin/env node
 /**
@@ -902,7 +1001,7 @@ server.listen(PORT, () => {
   const packageJsonContent = JSON.stringify({
     name: "mirrored-application",
     version: "1.0.0",
-    description: "Mirrored application generated by WebHarvest with standalone zero-dependency server",
+    description: `Mirrored application for ${hostname} generated by WebHarvest`,
     main: "server.js",
     scripts: {
       start: "node server.js",
@@ -1004,23 +1103,40 @@ echo Please install Node.js or Python to run this mirror.
 pause
 `;
 
-  // 6. Documentation (README.md)
-  const readmeMdContent = `# Mirrored Web Application
+  // 6. Complete Documentation (README.md) as per this ZIP file
+  const readmeMdContent = `# 🌐 Mirror Archive: ${hostname}
 
-This directory contains a complete, self-contained offline mirror of **${hostname}** created with **WebHarvest**.
+> Complete, self-contained offline mirror generated by **WebHarvest v3** on ${new Date().toUTCString()}.
 
 ---
 
-## How to Run Locally
+## 📊 Archive Summary & Metrics
 
-You can launch this application instantly using either Node.js or Python:
+| Specification | Value |
+| :--- | :--- |
+| **Target Host** | \`${hostname}\` |
+| **Source URL** | [${sourceUrl}](${sourceUrl}) |
+| **Total Archive Size** | **${discoveredSize}** |
+| **Captured Pages** | **${discoveredPagesCount}** HTML documents |
+| **Captured Assets** | **${discoveredAssetsCount || 'Multiple'}** resources (Images, CSS, JS, Fonts) |
+| **Detected Technology** | \`${discoveredTechStack}\` |
+| **CORS & Fallback** | Full SPA routing fallback & extensionless clean URL support |
+
+---
+
+## 🚀 How to Run Locally
+
+You can launch this mirrored site immediately with **zero external dependencies**:
 
 ### Option 1: Node.js (Recommended)
-Zero external dependencies required. Simply run:
+Zero npm install required. Simply run:
 \`\`\`bash
 node server.js
 \`\`\`
-Or with npm:
+*Runs natively using Node.js standard libraries (\`http\`, \`fs\`, \`path\`).*
+*Default port: \`http://localhost:8080\` (or custom: \`node server.js 3000\`)*
+
+Or using npm:
 \`\`\`bash
 npm start
 \`\`\`
@@ -1029,18 +1145,41 @@ npm start
 \`\`\`bash
 python3 serve.py
 \`\`\`
+*Default port: \`http://localhost:8080\` (or custom: \`python3 serve.py 3000\`)*
 
-### Option 3: Double-Click Launcher
-- **Linux / macOS**: Double click \`start.sh\` (or run \`./start.sh\`)
-- **Windows**: Double click \`start.bat\`
+### Option 3: Double-Click Shell Launchers
+- **macOS / Linux**: Double-click \`start.sh\` (or run \`./start.sh\` in terminal)
+- **Windows**: Double-click \`start.bat\`
 
 ---
 
-## Features
-- **Zero-Dependency Runner**: Uses native Node.js / Python standard libraries.
-- **SPA Fallback**: Full client-side routing support for modern Vue, React, Vite, and Next.js applications.
-- **Offline Auth State**: Pre-hydrated localStorage and session tokens for instant admin access.
-- **Clean Extensionless URLs**: Clean URL resolution (e.g. \`/apps/email\` maps to \`/apps/email.html\`).
+## 📑 Captured Pages Index
+
+${pagesTable}
+
+---
+
+## 📁 Directory Structure
+
+\`\`\`
+├── index.html          # Main landing entry page
+├── server.js           # Zero-dependency Node.js standalone server
+├── serve.py            # Zero-dependency Python 3 server
+├── start.sh            # One-click launcher for macOS/Linux
+├── start.bat           # One-click launcher for Windows
+├── package.json        # NPM start configuration
+├── README.md           # This archive summary and documentation
+├── pages/              # Mirrored subpages and routes
+└── assets/             # Bundled images, stylesheets, scripts, and fonts
+\`\`\`
+
+---
+
+## 🛡️ Offline Features
+- **Client-Side SPA Routing**: Automatically falls back to internal routes and resolves HTML files dynamically.
+- **Clean Extensionless URLs**: Maps routes like \`/about\` directly to \`/about.html\`.
+- **Pre-Hydrated Demo Auth**: Offline session tokens and demo user records are primed for testing.
+- **100% Self-Contained**: All relative links, media, and stylesheets operate completely offline.
 `;
 
   const filesToWrite = [

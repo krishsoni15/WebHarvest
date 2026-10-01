@@ -49,6 +49,30 @@ export async function GET(
 
     const { stats, recentFiles } = scanFolderStats(id, currentJob.hostname);
 
+    // Read latest log lines for real-time streaming
+    let recentLogs = '';
+    try {
+      const logFilePath = path.join(getBaseDownloadDir(id), 'crawl_logs.txt');
+      if (fs.existsSync(logFilePath)) {
+        const logStat = fs.statSync(logFilePath);
+        const tailBytes = Math.min(logStat.size, 64 * 1024);
+        if (logStat.size <= tailBytes) {
+          recentLogs = fs.readFileSync(logFilePath, 'utf-8');
+        } else {
+          const fd = fs.openSync(logFilePath, 'r');
+          const buffer = Buffer.alloc(tailBytes);
+          fs.readSync(fd, buffer, 0, tailBytes, logStat.size - tailBytes);
+          fs.closeSync(fd);
+          const text = buffer.toString('utf-8');
+          const firstNl = text.indexOf('\n');
+          recentLogs = firstNl >= 0 ? text.slice(firstNl + 1) : text;
+        }
+        // Only send last 100 lines via SSE to keep payload small
+        const logLines = recentLogs.trim().split('\n');
+        recentLogs = logLines.slice(-100).join('\n');
+      }
+    } catch {}
+
     try {
       writer.write(
         encoder.encode(
@@ -59,6 +83,7 @@ export async function GET(
             recentFiles,
             hostname: currentJob.hostname,
             url: currentJob.url,
+            logs: recentLogs,
           })}\n\n`
         )
       );

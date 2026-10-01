@@ -19,12 +19,11 @@ export async function GET(
 
     const job = activeJobs.get(id)!;
 
-    // Caching layer: return immediately if completed or cached within last 4 seconds
+    // Caching layer: return cached only within last 5 seconds unless refresh requested
     const now = Date.now();
-    if (job.cachedOverview) {
-      if (job.status === 'completed' || (now - (job.lastOverviewUpdate || 0) < 4000)) {
-        return NextResponse.json(job.cachedOverview);
-      }
+    const shouldRefresh = req.nextUrl.searchParams.get('refresh') === 'true';
+    if (!shouldRefresh && job.cachedOverview && (now - (job.lastOverviewUpdate || 0) < 5000)) {
+      return NextResponse.json(job.cachedOverview);
     }
 
     const baseDir = getBaseDownloadDir(id);
@@ -68,70 +67,143 @@ export async function GET(
     let techStack = 'Static HTML/CSS';
     let indexHtmlPath = path.join(targetDir, 'index.html');
 
+    // Fallback: search manifest or pages directory for HTML content if root index.html does not exist
     if (!fs.existsSync(indexHtmlPath)) {
-      try {
-        const subdirs = fs.readdirSync(baseDir).filter(f => {
+      const manifestPath = path.join(baseDir, 'manifest.json');
+      if (fs.existsSync(manifestPath)) {
+        try {
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+          const firstHtml = manifest.resources?.find((r: any) =>
+            r.localPath && (r.localPath.endsWith('.html') || r.localPath.endsWith('.htm')) &&
+            fs.existsSync(path.join(baseDir, r.localPath))
+          );
+          if (firstHtml) {
+            indexHtmlPath = path.join(baseDir, firstHtml.localPath);
+          }
+        } catch {}
+      }
+    }
+
+    if (!fs.existsSync(indexHtmlPath)) {
+      const pagesDir = path.join(baseDir, 'pages');
+      if (fs.existsSync(pagesDir)) {
+        function findHtml(d: string): string | null {
           try {
-            return fs.statSync(path.join(baseDir, f)).isDirectory() && !f.startsWith('.');
-          } catch { return false; }
-        });
-        const cleanHostname = job.hostname.toLowerCase().replace('www.', '');
-        const sortedSubdirs = subdirs.sort((a, b) => {
-          const aMatch = a.toLowerCase().includes(cleanHostname) ? 1 : 0;
-          const bMatch = b.toLowerCase().includes(cleanHostname) ? 1 : 0;
-          return bMatch - aMatch;
-        });
-        const indexMatch = sortedSubdirs.find(d => fs.existsSync(path.join(baseDir, d, 'index.html')));
-        if (indexMatch) {
-          indexHtmlPath = path.join(baseDir, indexMatch, 'index.html');
+            const list = fs.readdirSync(d);
+            for (const item of list) {
+              const full = path.join(d, item);
+              if (fs.statSync(full).isDirectory()) {
+                const found = findHtml(full);
+                if (found) return found;
+              } else if (item.endsWith('.html') || item.endsWith('.htm')) {
+                return full;
+              }
+            }
+          } catch {}
+          return null;
         }
+        const found = findHtml(pagesDir);
+        if (found) indexHtmlPath = found;
+      }
+    }
+
+    let htmlSample = '';
+    if (fs.existsSync(indexHtmlPath)) {
+      try {
+        htmlSample = fs.readFileSync(indexHtmlPath, 'utf-8');
       } catch {}
     }
 
-    if (fs.existsSync(indexHtmlPath)) {
+    // Also check root baseDir index.html if different
+    const baseIndexPath = path.join(baseDir, 'index.html');
+    if (fs.existsSync(baseIndexPath) && baseIndexPath !== indexHtmlPath) {
       try {
-        const content = fs.readFileSync(indexHtmlPath, 'utf-8');
-        if (/wp-content|wp-includes/i.test(content)) {
-          techStack = 'WordPress';
-        } else if (/cdn\.shopify\.com/i.test(content)) {
-          techStack = 'Shopify';
-        } else if (/wix\.com|_wix/i.test(content)) {
-          techStack = 'Wix';
-        } else if (/squarespace\.com/i.test(content)) {
-          techStack = 'Squarespace';
-        } else if (/webflow\.com|data-wf-page/i.test(content)) {
-          techStack = 'Webflow';
-        } else if (/_next\/static|__next|next\.js/i.test(content)) {
-          techStack = 'Next.js (React)';
-        } else if (/vue\.js|nuxt|__nuxt/i.test(content)) {
-          techStack = 'Vue.js / Nuxt';
-        } else if (/ng-version|angular/i.test(content)) {
-          techStack = 'Angular';
-        } else if (/gatsby/i.test(content)) {
-          techStack = 'Gatsby (React)';
-        } else if (/ghost\.org|ghost-/i.test(content)) {
-          techStack = 'Ghost CMS';
-        } else if (/drupal/i.test(content)) {
-          techStack = 'Drupal';
-        } else if (/joomla/i.test(content)) {
-          techStack = 'Joomla';
-        } else if (/tailwindcss|tailwind/i.test(content)) {
-          techStack = 'Tailwind CSS';
-        } else if (/bootstrap/i.test(content)) {
-          techStack = 'Bootstrap';
-        } else if (/react/i.test(content)) {
-          techStack = 'React';
-        } else if (/jquery/i.test(content)) {
-          techStack = 'jQuery';
-        }
+        htmlSample += ' ' + fs.readFileSync(baseIndexPath, 'utf-8').slice(0, 10000);
       } catch {}
     }
+
+    // Also sample a couple other HTML or JS files in targetDir for deeper fingerprinting
+    try {
+      if (fs.existsSync(targetDir)) {
+        const sampleFiles = fs.readdirSync(targetDir).filter(f => f.endsWith('.html') || f.endsWith('.js')).slice(0, 5);
+        for (const sf of sampleFiles) {
+          try {
+            htmlSample += ' ' + fs.readFileSync(path.join(targetDir, sf), 'utf-8').slice(0, 5000);
+          } catch {}
+        }
+      }
+    } catch {}
+
+    const fullContext = (job.url + ' ' + job.hostname + ' ' + htmlSample).toLowerCase();
+
+    // 1. Template & Product Brand Fingerprints (e.g. Vuexy on Pixinvent)
+    if (fullContext.includes('vuexy')) {
+      if (fullContext.includes('nextjs') || fullContext.includes('_next')) {
+        techStack = 'Vuexy (Next.js / React)';
+      } else if (fullContext.includes('vue') || fullContext.includes('vuetify')) {
+        techStack = 'Vuexy (Vue.js / Vuetify)';
+      } else if (fullContext.includes('html') || fullContext.includes('bootstrap')) {
+        techStack = 'Vuexy (HTML5 / Bootstrap)';
+      } else {
+        techStack = 'Vuexy Admin Template';
+      }
+    }
+    // 2. Fullstack & Modern Web Frameworks (Next.js, Nuxt, SvelteKit, Astro)
+    else if (/_next\/static|__next|next\.js/i.test(htmlSample) || fullContext.includes('nextjs')) {
+      techStack = 'Next.js (React)';
+    } else if (/_nuxt|__nuxt/i.test(htmlSample) || fullContext.includes('nuxt')) {
+      techStack = 'Nuxt.js (Vue)';
+    } else if (/__svelte|svelte-/i.test(htmlSample) || fullContext.includes('svelte')) {
+      techStack = 'SvelteKit';
+    } else if (/astro-/i.test(htmlSample) || fullContext.includes('astro')) {
+      techStack = 'Astro';
+    }
+    // 3. Reactive UI Component Libraries (Vue.js, React, Angular)
+    else if (/vue(\.min|\.runtime|\.esm)?\.js|vuetify|data-v-|__vue/i.test(htmlSample) || fullContext.includes('vuejs') || fullContext.includes('vuetify')) {
+      techStack = fullContext.includes('bootstrap') ? 'Vue.js & Bootstrap' : 'Vue.js (Vuetify)';
+    } else if (/react-dom|data-reactroot|react\.production|_react/i.test(htmlSample) || fullContext.includes('react')) {
+      techStack = fullContext.includes('tailwind') ? 'React / Tailwind CSS' : 'React (ES Modules)';
+    } else if (/ng-version|angular/i.test(htmlSample) || fullContext.includes('angular')) {
+      techStack = 'Angular';
+    } else if (/gatsby/i.test(htmlSample)) {
+      techStack = 'Gatsby (React)';
+    }
+    // 4. Modern CSS & UI Frameworks
+    else if (/tailwindcss|tailwind/i.test(htmlSample)) {
+      techStack = 'Tailwind CSS (HTML5)';
+    } else if (/bootstrap/i.test(htmlSample)) {
+      techStack = 'Bootstrap 5 (HTML5)';
+    }
+    // 5. CMS & E-Commerce Platforms (Only when no modern frontend framework was prioritized)
+    else if (/wp-content|wp-includes/i.test(htmlSample)) {
+      techStack = 'WordPress';
+    } else if (/cdn\.shopify\.com|shopify/i.test(htmlSample)) {
+      techStack = 'Shopify';
+    } else if (/webflow\.com|data-wf-page/i.test(htmlSample)) {
+      techStack = 'Webflow';
+    } else if (/wix\.com|_wix/i.test(htmlSample)) {
+      techStack = 'Wix';
+    } else if (/squarespace\.com/i.test(htmlSample)) {
+      techStack = 'Squarespace';
+    } else if (/ghost\.org|ghost-/i.test(htmlSample)) {
+      techStack = 'Ghost CMS';
+    } else if (/drupal/i.test(htmlSample)) {
+      techStack = 'Drupal';
+    } else if (/joomla/i.test(htmlSample)) {
+      techStack = 'Joomla';
+    } else if (/jquery/i.test(htmlSample)) {
+      techStack = 'jQuery & HTML5';
+    }
+
+    // Extract brand color palette from CSS files or fallback to harmonious palette
+    const extractedColors = extractColorsFromDir(baseDir);
 
     const result = {
       id: job.id,
       url: job.url,
       hostname: job.hostname,
       techStack,
+      colors: extractedColors,
       status: job.status,
       error: job.error,
       stats: {
@@ -158,3 +230,67 @@ function formatBytes(bytes: number) {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
+
+function extractColorsFromDir(baseDir: string): string[] {
+  const defaultPalette = ['#e11d48', '#06b6d4', '#10b981', '#84cc16', '#a855f7'];
+  try {
+    const cssFiles: string[] = [];
+    function findCss(dir: string) {
+      if (!fs.existsSync(dir)) return;
+      const list = fs.readdirSync(dir);
+      for (const item of list) {
+        if (item.startsWith('.')) continue;
+        const full = path.join(dir, item);
+        try {
+          const stat = fs.statSync(full);
+          if (stat.isDirectory()) {
+            findCss(full);
+          } else if (item.endsWith('.css')) {
+            cssFiles.push(full);
+          }
+        } catch {}
+      }
+    }
+
+    findCss(path.join(baseDir, 'assets', 'css'));
+    if (cssFiles.length === 0) findCss(baseDir);
+
+    const colorCounts = new Map<string, number>();
+    const hexRegex = /#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g;
+    const ignoredColors = new Set(['#fff', '#ffffff', '#000', '#000000', '#111', '#111111', '#222', '#222222', '#333', '#333333', '#eee', '#eeeeee', '#f5f5f5', '#fafafa', '#ccc', '#cccccc', '#ddd', '#dddddd']);
+
+    for (const file of cssFiles.slice(0, 5)) {
+      try {
+        const text = fs.readFileSync(file, 'utf-8');
+        let match;
+        while ((match = hexRegex.exec(text)) !== null) {
+          let hex = match[0].toLowerCase();
+          if (hex.length === 4) {
+            hex = `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`;
+          }
+          if (!ignoredColors.has(hex)) {
+            colorCounts.set(hex, (colorCounts.get(hex) || 0) + 1);
+          }
+        }
+      } catch {}
+    }
+
+    const sortedColors = Array.from(colorCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([hex]) => hex);
+
+    if (sortedColors.length >= 3) {
+      const distinct: string[] = [];
+      for (const c of sortedColors) {
+        if (distinct.length >= 5) break;
+        if (!distinct.includes(c)) distinct.push(c);
+      }
+      while (distinct.length < 5) {
+        distinct.push(defaultPalette[distinct.length % defaultPalette.length]);
+      }
+      return distinct.slice(0, 5);
+    }
+  } catch {}
+  return defaultPalette;
+}
+

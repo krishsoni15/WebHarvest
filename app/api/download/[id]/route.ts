@@ -41,9 +41,51 @@ export async function GET(
     }
 
     if (!hasValidZip) {
-      // Ensure complete zero-dependency runnable bundle exists before zipping
+      // Ensure complete zero-dependency runnable bundle and rich README.md exist before zipping
       try {
-        createCompleteRunnableBundle(targetDir, baseDir, job.hostname);
+        const pages: string[] = [];
+        function scanHtml(dir: string, base: string = '') {
+          try {
+            const list = fs.readdirSync(dir, { withFileTypes: true });
+            for (const item of list) {
+              if (item.name.startsWith('.')) continue;
+              const rel = base ? `${base}/${item.name}` : item.name;
+              if (item.isFile() && (item.name.endsWith('.html') || item.name.endsWith('.htm'))) {
+                pages.push(rel);
+              } else if (item.isDirectory() && pages.length < 50) {
+                scanHtml(path.join(dir, item.name), rel);
+              }
+            }
+          } catch {}
+        }
+        scanHtml(targetDir);
+
+        let totalBytes = 0;
+        function getDirSize(d: string) {
+          try {
+            const files = fs.readdirSync(d, { withFileTypes: true });
+            for (const f of files) {
+              const full = path.join(d, f.name);
+              if (f.isFile()) {
+                totalBytes += fs.statSync(full).size;
+              } else if (f.isDirectory() && !f.name.startsWith('.')) {
+                getDirSize(full);
+              }
+            }
+          } catch {}
+        }
+        getDirSize(targetDir);
+
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = totalBytes > 0 ? Math.floor(Math.log(totalBytes) / Math.log(k)) : 0;
+        const totalSizeFormatted = totalBytes > 0 ? (parseFloat((totalBytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]) : '0 B';
+
+        createCompleteRunnableBundle(targetDir, baseDir, job.hostname, {
+          url: job.url,
+          totalSize: totalSizeFormatted,
+          htmlPages: pages,
+        });
       } catch {}
 
       // Fast system zip
@@ -60,7 +102,27 @@ export async function GET(
           hasValidZip = true;
         }
       } catch (zipErr) {
-        console.error('System zip failed:', zipErr);
+        console.warn('System zip failed, falling back to streaming archiver:', zipErr);
+      }
+
+      // 2. FALLBACK: Node streaming archiver if system zip was unavailable
+      if (!hasValidZip) {
+        try {
+          const { createMirrorZipStream } = await import('@/lib/export/zip');
+          const archiveStream = createMirrorZipStream(targetDir);
+          const writeStream = fs.createWriteStream(zipFilePath);
+          await new Promise<void>((resolve, reject) => {
+            archiveStream.pipe(writeStream);
+            archiveStream.on('end', () => resolve());
+            archiveStream.on('error', reject);
+            writeStream.on('error', reject);
+          });
+          if (fs.existsSync(zipFilePath) && fs.statSync(zipFilePath).size > 0) {
+            hasValidZip = true;
+          }
+        } catch (archErr) {
+          console.error('Archiver fallback failed:', archErr);
+        }
       }
     }
 

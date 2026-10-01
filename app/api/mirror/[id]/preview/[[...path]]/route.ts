@@ -25,6 +25,8 @@ const MIME_OVERRIDES: Record<string, string> = {
   '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
   '.ico': 'image/x-icon',
+  '.md': 'text/markdown; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
 };
 
 export async function GET(
@@ -103,7 +105,61 @@ export async function GET(
     let pathFound = resolvedFilePath !== null;
     let filePath = resolvedFilePath || primaryPath;
 
-    // Fallback 1: Search across all subdirectories in baseDir (handles multi-domain crawls like pixinvent.com vs demos.pixinvent.com)
+    // Fallback 1: Check manifest.json for initial entry page if index.html was requested but not found
+    if (!pathFound && (segments.length === 0 || segments.join('/') === 'index.html')) {
+      const manifestPath = path.join(baseDir, 'manifest.json');
+      if (fs.existsSync(manifestPath)) {
+        try {
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+          const firstPage = manifest.resources?.find((r: any) =>
+            r.localPath && (r.localPath.endsWith('.html') || r.localPath.endsWith('.htm')) &&
+            fs.existsSync(path.join(baseDir, r.localPath))
+          );
+          if (firstPage) {
+            filePath = path.join(baseDir, firstPage.localPath);
+            pathFound = true;
+          }
+        } catch {}
+      }
+
+      // Check pages/ directory for any html file
+      if (!pathFound) {
+        const pagesDir = path.join(baseDir, 'pages');
+        if (fs.existsSync(pagesDir)) {
+          const found = findFirstHtmlRecursive(pagesDir);
+          if (found) {
+            filePath = found;
+            pathFound = true;
+          }
+        }
+      }
+
+      // Check entire baseDir for any html file
+      if (!pathFound) {
+        const found = findFirstHtmlRecursive(baseDir);
+        if (found) {
+          filePath = found;
+          pathFound = true;
+        }
+      }
+    }
+
+    // Fallback 2: Check inside baseDir/pages and baseDir/assets
+    if (!pathFound && segments.length > 0) {
+      const inPages = resolveFileOrDirectoryIndex(path.join(baseDir, 'pages', ...segments));
+      if (inPages) {
+        filePath = inPages;
+        pathFound = true;
+      } else {
+        const inAssets = resolveFileOrDirectoryIndex(path.join(baseDir, 'assets', ...segments));
+        if (inAssets) {
+          filePath = inAssets;
+          pathFound = true;
+        }
+      }
+    }
+
+    // Fallback 3: Search across all subdirectories in baseDir (handles multi-domain crawls like pixinvent.com vs demos.pixinvent.com)
     if (!pathFound) {
       try {
         const subdirs = fs.readdirSync(baseDir).filter(f => {
@@ -134,7 +190,7 @@ export async function GET(
       } catch {}
     }
 
-    // Fallback 2: Direct filename search across baseDir for static assets (CSS, JS, fonts, images)
+    // Fallback 4: Direct filename search across baseDir for static assets (CSS, JS, fonts, images)
     if (!pathFound && segments.length > 0) {
       const fileName = segments[segments.length - 1].split('?')[0];
       const ext = path.extname(fileName).toLowerCase();
@@ -147,8 +203,8 @@ export async function GET(
       }
     }
 
-    // Fallback 3: Single Page Application (SPA) routing fallback
-    // If an HTML navigation route is requested and no specific page exists on disk, serve the main index.html
+    // Fallback 5: Single Page Application (SPA) routing fallback
+    // If an HTML navigation route is requested and no specific page exists on disk, serve the main entry html
     if (!pathFound) {
       const requestedExt = path.extname(segments[segments.length - 1] || '');
       const isRouteRequest = !requestedExt || requestedExt === '.html' || requestedExt === '.htm';
@@ -161,6 +217,12 @@ export async function GET(
         } else if (fs.existsSync(baseIndex)) {
           filePath = baseIndex;
           pathFound = true;
+        } else {
+          const anyHtml = findFirstHtmlRecursive(baseDir);
+          if (anyHtml) {
+            filePath = anyHtml;
+            pathFound = true;
+          }
         }
       }
     }
@@ -174,6 +236,120 @@ export async function GET(
     }
 
     if (!pathFound || !fs.existsSync(filePath)) {
+      // If crawling is currently in progress, return a live stream holding page instead of 404
+      if (job.status === 'downloading') {
+        const liveHoldingHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta http-equiv="refresh" content="2"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Live Capture • ${job.hostname}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #09090b;
+      color: #fafafa;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+      text-align: center;
+    }
+    .scanner-box {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 32px 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      max-width: 420px;
+    }
+    .pulse-ring {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.12);
+      border-top: 2px solid #ffffff;
+      animation: spin 0.75s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+      margin-bottom: 20px;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #d4d4d8;
+      margin-bottom: 12px;
+    }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 8px #22c55e; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    h1 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 8px; color: #ffffff; }
+    p { font-size: 12px; color: #71717a; line-height: 1.5; font-mono; }
+  </style>
+</head>
+<body>
+  <div class="scanner-box">
+    <div class="pulse-ring"></div>
+    <div class="badge"><span class="dot"></span> Live Screen Stream</div>
+    <h1>Capturing ${job.hostname}</h1>
+    <p>Engine is actively downloading HTML DOM and assets. Screen will display automatically...</p>
+  </div>
+</body>
+</html>`;
+        return new Response(liveHoldingHtml, {
+          headers: {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+          },
+        });
+      }
+
+      // Dynamic On-Demand Asset Proxy & Cache (handles dynamic React / Next.js chunks, fonts, images)
+      const requestedExt = path.extname(segments[segments.length - 1]?.split('?')[0] || '').toLowerCase();
+      const isStaticAsset = ['.js', '.css', '.woff2', '.woff', '.ttf', '.png', '.jpg', '.jpeg', '.svg', '.json', '.webp', '.ico'].includes(requestedExt);
+      
+      if (isStaticAsset) {
+        try {
+          const remoteHost = job.hostname.includes('pixinvent') ? 'demos.pixinvent.com' : job.hostname;
+          const remoteUrl = `https://${remoteHost}/${segments.join('/')}`;
+          const remoteRes = await fetch(remoteUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+            },
+          });
+          if (remoteRes.ok) {
+            const buf = Buffer.from(await remoteRes.arrayBuffer());
+            const savePath = path.join(targetDir, ...segments);
+            try {
+              fs.mkdirSync(path.dirname(savePath), { recursive: true });
+              fs.writeFileSync(savePath, buf);
+            } catch {}
+            
+            const mimeType = remoteRes.headers.get('content-type') || MIME_OVERRIDES[requestedExt] || 'application/octet-stream';
+            return new Response(buf, {
+              headers: {
+                'Content-Type': mimeType,
+                'Cache-Control': 'public, max-age=31536000, immutable',
+                'Access-Control-Allow-Origin': '*',
+              },
+            });
+          }
+        } catch {}
+      }
+
       return new Response(`File not found: ${segments.join('/')}`, { status: 404 });
     }
 
@@ -225,6 +401,118 @@ export async function GET(
                   }
                 };
               }
+
+              // Offline Demo Session Hydration & Interactive Login Form Interception
+              try {
+                document.cookie = "__Secure-next-auth.session-token=webharvest_mock_session_token; path=/; SameSite=Lax";
+                document.cookie = "next-auth.session-token=webharvest_mock_session_token; path=/; SameSite=Lax";
+
+                if (!localStorage.getItem('userData')) {
+                  localStorage.setItem('userData', JSON.stringify({
+                    id: 1,
+                    role: 'admin',
+                    fullName: 'Vuexy Administrator',
+                    username: 'admin',
+                    email: 'admin@vuexy.com'
+                  }));
+                }
+                if (!localStorage.getItem('accessToken')) {
+                  localStorage.setItem('accessToken', 'webharvest_demo_authenticated_token');
+                }
+              } catch(e) {}
+
+              // Intercept fetch for /api/auth/session
+              try {
+                var origFetch = window.fetch;
+                window.fetch = function(input, init) {
+                  var url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+                  if (typeof url === 'string' && url.indexOf('/api/auth/session') !== -1) {
+                    return Promise.resolve(new Response(JSON.stringify({
+                      user: { name: 'Vuexy Administrator', email: 'admin@vuexy.com', image: null, role: 'admin' },
+                      expires: '2099-01-01T00:00:00.000Z'
+                    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+                  }
+                  return origFetch.apply(this, arguments);
+                };
+              } catch(e) {}
+
+              // Prevent Next.js router from forcing redirects to /login on non-login pages
+              try {
+                var pathname = window.location.pathname.toLowerCase();
+                var isViewingInternalPage = !pathname.includes('login') && !pathname.includes('signin') && !pathname.includes('auth');
+                if (isViewingInternalPage) {
+                  var origPush = window.history.pushState;
+                  var origReplace = window.history.replaceState;
+                  window.history.pushState = function(state, title, url) {
+                    if (typeof url === 'string' && (url.toLowerCase().includes('/login') || url.toLowerCase().includes('/signin'))) {
+                      console.warn('[WebHarvest] Neutralized client redirect to login on previewed page:', url);
+                      return;
+                    }
+                    return origPush.apply(this, arguments);
+                  };
+                  window.history.replaceState = function(state, title, url) {
+                    if (typeof url === 'string' && (url.toLowerCase().includes('/login') || url.toLowerCase().includes('/signin'))) {
+                      console.warn('[WebHarvest] Neutralized client redirect to login on previewed page:', url);
+                      return;
+                    }
+                    return origReplace.apply(this, arguments);
+                  };
+                }
+              } catch(e) {}
+
+              // Intercept login forms and buttons in offline preview
+              function handleOfflineLogin(formEl) {
+                try {
+                  var emailInput = (formEl || document).querySelector('input[type="email"], input[name="email"], input[name="username"], input[type="text"]');
+                  var userEmail = (emailInput && emailInput.value) ? emailInput.value : 'admin@vuexy.com';
+                  
+                  localStorage.setItem('userData', JSON.stringify({
+                    id: 1,
+                    role: 'admin',
+                    fullName: 'Vuexy Administrator',
+                    username: 'admin',
+                    email: userEmail
+                  }));
+                  localStorage.setItem('accessToken', 'webharvest_demo_authenticated_token');
+                  document.cookie = "__Secure-next-auth.session-token=webharvest_mock_session_token; path=/; SameSite=Lax";
+                  document.cookie = "next-auth.session-token=webharvest_mock_session_token; path=/; SameSite=Lax";
+
+                  window.parent.postMessage({ 
+                    type: 'webharvest:login_submit', 
+                    id: '${id}',
+                    email: userEmail,
+                    targetPage: 'en/dashboards/analytics.html' 
+                  }, '*');
+
+                  if ('${job.hostname}'.includes('pixinvent')) {
+                    setTimeout(function() {
+                      window.location.href = '/api/mirror/${id}/preview/demos.pixinvent.com/en/dashboards/analytics.html';
+                    }, 250);
+                  }
+                } catch(err) {}
+              }
+
+              document.addEventListener('submit', function(e) {
+                var form = e.target;
+                if (form && form.querySelector('input[type="password"]')) {
+                  e.preventDefault();
+                  handleOfflineLogin(form);
+                }
+              }, true);
+
+              document.addEventListener('click', function(e) {
+                var btn = e.target && e.target.closest ? e.target.closest('button, input[type="submit"]') : null;
+                if (btn) {
+                  var txt = (btn.innerText || btn.value || '').toLowerCase();
+                  if (txt.includes('login') || txt.includes('sign in') || btn.type === 'submit') {
+                    var pwd = document.querySelector('input[type="password"]');
+                    if (pwd) {
+                      e.preventDefault();
+                      handleOfflineLogin(btn.closest('form'));
+                    }
+                  }
+                }
+              }, true);
             })();
           </script>
         `;
@@ -284,3 +572,24 @@ function findFileRecursive(dir: string, targetName: string): string | null {
   } catch {}
   return null;
 }
+
+/** Recursively search for any .html or .htm file in a directory */
+function findFirstHtmlRecursive(dir: string): string | null {
+  try {
+    if (!fs.existsSync(dir)) return null;
+    const list = fs.readdirSync(dir);
+    for (const item of list) {
+      if (item.startsWith('.')) continue;
+      const full = path.join(dir, item);
+      const stat = fs.statSync(full);
+      if (stat.isDirectory()) {
+        const found = findFirstHtmlRecursive(full);
+        if (found) return found;
+      } else if (item.endsWith('.html') || item.endsWith('.htm')) {
+        return full;
+      }
+    }
+  } catch {}
+  return null;
+}
+

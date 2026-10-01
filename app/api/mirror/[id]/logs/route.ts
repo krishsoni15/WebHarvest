@@ -15,9 +15,9 @@ export async function GET(
       return NextResponse.json({ logs: 'Waiting for crawl process to start...' });
     }
 
-    // Read only the last ~32KB of the log file to prevent massive payloads
+    // Read up to 256KB of the log file tail for real-time streaming
     const stat = fs.statSync(logFilePath);
-    const maxBytes = 32 * 1024;
+    const maxBytes = 256 * 1024;
     let logs: string;
 
     if (stat.size <= maxBytes) {
@@ -34,12 +34,16 @@ export async function GET(
       logs = firstNewline >= 0 ? text.slice(firstNewline + 1) : text;
     }
 
-    // Return only last 200 lines for UI display
+    // Return last 1000 lines for UI display
     const lines = logs.trim().split('\n');
-    const tailLines = lines.slice(-200).join('\n');
+    const tailLines = lines.slice(-1000).join('\n');
 
-    return NextResponse.json({ logs: tailLines || 'No log output yet.' });
+    return NextResponse.json(
+      { logs: tailLines || 'No log output yet.' },
+      { headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' } }
+    );
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Failed to read logs' }, { status: 500 });
   }
 }
+

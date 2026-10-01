@@ -10,6 +10,9 @@
     "crawl:auth": "node scripts/crawler_auth.cjs"
   },
   "dependencies": {
+    "archiver": "^8.0.0",
+    "better-sqlite3": "^13.0.3",
+    "cheerio": "^1.2.0",
     "jszip": "^3.10.1",
     "lucide-react": "^1.28.0",
     "mime-types": "^3.0.2",
@@ -20,6 +23,8 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/archiver": "^8.0.0",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/jszip": "^3.4.0",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^20",

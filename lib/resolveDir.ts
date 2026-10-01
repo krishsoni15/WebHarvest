@@ -44,12 +44,41 @@ export function resolveTargetDir(id: string, hostname: string): string {
     }
   }
 
+  const INTERNAL_DIRS = new Set([
+    'assets',
+    'pages',
+    'logs',
+    'analysis',
+    'screenshots',
+    'data',
+    'node_modules',
+    '.git',
+    'css',
+    'js',
+    'fonts',
+    'images',
+  ]);
+
   try {
+    // If baseDir already has manifest.json, report.json, or pages directory, baseDir IS the root!
+    if (
+      fs.existsSync(path.join(baseDir, 'manifest.json')) ||
+      fs.existsSync(path.join(baseDir, 'report.json')) ||
+      fs.existsSync(path.join(baseDir, 'pages')) ||
+      fs.existsSync(path.join(baseDir, 'assets')) ||
+      fs.existsSync(path.join(baseDir, 'index.html'))
+    ) {
+      if (job?.status === 'completed') {
+        cacheResolvedDir(id, baseDir);
+      }
+      return baseDir;
+    }
+
     const items = fs.readdirSync(baseDir).filter(f => !f.startsWith('.') && f !== 'crawl_logs.txt');
 
     const subdirs = items.filter(f => {
       try {
-        return fs.statSync(path.join(baseDir, f)).isDirectory();
+        return fs.statSync(path.join(baseDir, f)).isDirectory() && !INTERNAL_DIRS.has(f.toLowerCase());
       } catch {
         return false;
       }
@@ -119,12 +148,31 @@ export function resolveTargetDir(id: string, hostname: string): string {
   return baseDir;
 }
 
+import { getJob } from './db/client';
+
 /**
  * Ensures a job entry exists in the activeJobs map for the given id.
  * Used by routes that may be called after a server restart (hot reload).
  */
 export function ensureJobExists(id: string): boolean {
   if (activeJobs.has(id)) return true;
+
+  // 1. Check persistent SQLite database
+  try {
+    const dbRecord = getJob(id);
+    if (dbRecord) {
+      activeJobs.set(id, {
+        id: dbRecord.id,
+        url: dbRecord.url,
+        hostname: dbRecord.hostname,
+        status: dbRecord.status === 'completed' ? 'completed' : dbRecord.status === 'failed' ? 'failed' : 'downloading',
+        addedAt: dbRecord.created_at,
+        completedAt: dbRecord.completed_at || undefined,
+        error: dbRecord.error_message || undefined,
+      });
+      return true;
+    }
+  } catch {}
 
   const baseDir = getBaseDownloadDir(id);
 
