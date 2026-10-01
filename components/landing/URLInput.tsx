@@ -10,6 +10,7 @@ interface URLInputProps {
   onChange: (val: string) => void;
   onSubmit: () => void;
   isLoading: boolean;
+  errorMessage?: string | null;
 }
 
 export function URLInput({
@@ -17,6 +18,7 @@ export function URLInput({
   onChange,
   onSubmit,
   isLoading,
+  errorMessage,
 }: URLInputProps) {
   const [error, setError] = useState<string | null>(null);
 
@@ -92,10 +94,10 @@ export function URLInput({
           </ClickSpark>
         </div>
 
-        {error && (
+        {(error || errorMessage) && (
           <p className="mt-2 text-xs font-medium text-destructive pl-3 flex items-center gap-1.5">
             <span className="w-1 h-1 rounded-full bg-destructive" />
-            {error}
+            {error || errorMessage}
           </p>
         )}
       </form>

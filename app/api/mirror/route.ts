@@ -12,10 +12,12 @@ import { validateURL } from '@/lib/security/validate-url';
 import { dnsGuard } from '@/lib/security/dns-guard';
 import { defaultRateLimiter } from '@/lib/security/rate-limit';
 import { JobManager } from '@/lib/jobs/manager';
+import { jobQueue } from '@/lib/jobs/queue';
+import { createJob as dbCreateJob } from '@/lib/db/client';
 import { CAPTURE_PRESETS } from '@/lib/crawler/presets';
 
 // Rate limiting: max concurrent downloads
-const MAX_CONCURRENT_JOBS = 5;
+const MAX_CONCURRENT_JOBS = 50;
 
 // Blocked hostnames/IPs for security
 const BLOCKED_PATTERNS = [
@@ -121,12 +123,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Security check blocked: ${dnsCheck.reason}` }, { status: 403 });
     }
 
-    // Clean up stale in-memory downloading jobs older than 3 minutes that have no active process
+    // Clean up stale in-memory downloading jobs that have no active process or running engine
     const now = Date.now();
     for (const [jid, j] of activeJobs.entries()) {
-      if (j.status === 'downloading' && now - j.addedAt > 180000 && !activeProcesses.has(jid)) {
-        j.status = 'completed';
-        activeJobs.set(jid, j);
+      if (j.status === 'downloading') {
+        const isProcRunning = activeProcesses.has(jid);
+        const isQueueRunning = jobQueue.isRunning(jid);
+        if (!isProcRunning && !isQueueRunning && (now - j.addedAt > 20000)) {
+          j.status = 'completed';
+          activeJobs.set(jid, j);
+        }
       }
     }
 
@@ -136,13 +142,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Server busy: ${activeCount} mirrors in progress. Please try again shortly.` }, { status: 429 });
     }
 
-    // Follow redirects to resolve final target URL
+    // Follow redirects to resolve final target URL (fast 1500ms timeout)
     let resolvedUrl = url;
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const timeoutId = setTimeout(() => controller.abort(), 1500);
       const res = await fetch(url, {
-        method: 'GET',
+        method: 'HEAD',
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         },
@@ -150,9 +156,9 @@ export async function POST(req: NextRequest) {
         redirect: 'follow',
       });
       clearTimeout(timeoutId);
-      resolvedUrl = res.url;
+      if (res.url) resolvedUrl = res.url;
     } catch (e) {
-      console.warn("Failed to resolve URL redirect, using original:", e);
+      // Fallback gracefully without delaying job creation
     }
     url = resolvedUrl;
 
@@ -192,6 +198,21 @@ export async function POST(req: NextRequest) {
       !!body.authCrawler;
 
     if (isVuexyOrSpa) {
+      try {
+        dbCreateJob({
+          id,
+          url,
+          hostname: resolvedHostname,
+          mode: 'playwright',
+          download_dir: downloadDir,
+          crawl_config: {
+            mode: 'playwright',
+            scopeConfig: body.scopeConfig,
+            captureRules: body.captureRules,
+          },
+        });
+      } catch {}
+
       const requestedLimit = body.limits?.maxPages ?? body.maxPages ?? 10000;
       const isUnlimited = requestedLimit === 0 || requestedLimit >= 50000;
       const maxPages = isUnlimited 

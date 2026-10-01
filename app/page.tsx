@@ -22,6 +22,7 @@ export default function Home() {
   // Core URL State
   const [url, setUrl] = useState('');
   const [selectedPreset, setSelectedPreset] = useState<PresetKey>('full');
+  const [serverError, setServerError] = useState<string | null>(null);
 
   // Crawl Configuration State - Zero-decision smart deep crawl defaults
   const [config, setConfig] = useState<CrawlConfigState>({
@@ -116,6 +117,7 @@ export default function Home() {
     }
 
     setIsLoading(true);
+    setServerError(null);
     try {
       const response = await fetch('/api/mirror', {
         method: 'POST',
@@ -161,10 +163,10 @@ export default function Home() {
         localStorage.setItem('webharvest_recent_jobs', JSON.stringify(updated));
       } catch {}
 
-      // Navigate to live crawl dashboard
-      router.push(`/mirror/${data.id}`);
+      // Navigate immediately to live crawl dashboard
+      window.location.href = `/mirror/${data.id}`;
     } catch (err: any) {
-      alert(err.message || 'Capture initialization error');
+      setServerError(err.message || 'Capture initialization error');
       setIsLoading(false);
     }
   };
@@ -215,9 +217,13 @@ export default function Home() {
         {/* Crisp URL Input */}
         <URLInput
           url={url}
-          onChange={setUrl}
+          onChange={(val) => {
+            setUrl(val);
+            if (serverError) setServerError(null);
+          }}
           onSubmit={handleStartCapture}
           isLoading={isLoading}
+          errorMessage={serverError}
         />
 
         {/* 4 Clean Presets */}
