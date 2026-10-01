@@ -143,6 +143,16 @@ export default function MirrorPage() {
 
         // Calculate progress percentage
         if (data.status === 'completed') {
+          setStatus('completed');
+          setLoadingProgress(100);
+          eventSource.close();
+          fetchAllCompletedData();
+        } else if (
+          data.status !== 'completed' &&
+          typeof data.logs === 'string' &&
+          (data.logs.includes('Crawl completed') || data.logs.includes('Offline mirror bundle ready'))
+        ) {
+          setStatus('completed');
           setLoadingProgress(100);
           eventSource.close();
           fetchAllCompletedData();
@@ -153,6 +163,7 @@ export default function MirrorPage() {
           setLoadingProgress(calculated);
           setCurrentAction('Downloading assets and rewriting relative links...');
         } else if (data.status === 'failed') {
+          setStatus('failed');
           eventSource.close();
         }
       } catch (err) {
@@ -229,13 +240,15 @@ export default function MirrorPage() {
     } catch {}
   };
 
-  // Periodically fetch discovered files during active crawl so preview switcher has latest pages
+  // Periodically fetch discovered files and status during active crawl
   useEffect(() => {
     if (!id || status !== 'downloading') return;
 
     fetchFiles();
+    fetchOverview();
     const interval = setInterval(() => {
       fetchFiles();
+      fetchOverview();
     }, 3500);
 
     return () => clearInterval(interval);
@@ -248,6 +261,7 @@ export default function MirrorPage() {
       const overviewRes = await fetch(`/api/mirror/${id}/overview?refresh=true`);
       if (overviewRes.ok) {
         const ov = await overviewRes.json();
+        if (ov.status) setStatus(ov.status);
         if (ov.stats?.size) setTotalSizeFormatted(ov.stats.size);
         if (ov.techStack) setTechStack(ov.techStack);
         if (ov.colors && Array.isArray(ov.colors) && ov.colors.length > 0) setColors(ov.colors);

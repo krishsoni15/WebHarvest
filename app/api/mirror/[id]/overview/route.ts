@@ -28,8 +28,9 @@ export async function GET(
 
     const baseDir = getBaseDownloadDir(id);
     const targetDir = resolveTargetDir(id, job.hostname);
+    const effectiveDir = fs.existsSync(targetDir) ? targetDir : baseDir;
 
-    if (!fs.existsSync(targetDir)) {
+    if (!fs.existsSync(effectiveDir)) {
       return NextResponse.json({ error: 'Download directory not found' }, { status: 404 });
     }
 
@@ -61,11 +62,11 @@ export async function GET(
       } catch {}
     }
 
-    walk(targetDir);
+    walk(effectiveDir);
 
     // Enhanced tech stack detection
     let techStack = 'Static HTML/CSS';
-    let indexHtmlPath = path.join(targetDir, 'index.html');
+    let indexHtmlPath = path.join(effectiveDir, 'index.html');
 
     // Fallback: search manifest or pages directory for HTML content if root index.html does not exist
     if (!fs.existsSync(indexHtmlPath)) {

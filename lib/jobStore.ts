@@ -4,7 +4,7 @@ export interface Job {
   id: string;
   url: string;
   hostname: string;
-  status: 'downloading' | 'completed' | 'failed';
+  status: 'downloading' | 'completed' | 'failed' | 'cancelled';
   error?: string;
   addedAt: number;
   completedAt?: number;

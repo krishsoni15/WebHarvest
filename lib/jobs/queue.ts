@@ -17,6 +17,9 @@ import { detectTechnology } from '../analysis/technology';
 import { calculateMirrorHealth } from '../analysis/health';
 import { sanitizeManifestAuth } from '../auth/session';
 import { classifyResource } from '../processor/classify';
+import { activeJobs, Job } from '../jobStore';
+import { createCompleteRunnableBundle } from '../authCrawler';
+import { extractHostname } from '../crawler/normalize';
 import path from 'path';
 import fs from 'fs/promises';
 
@@ -33,7 +36,7 @@ export interface EnqueueJobOptions {
 
 export class BackgroundJobQueue extends EventEmitter {
   private queue: EnqueueJobOptions[] = [];
-  private activeJobs = new Map<string, CrawlEngine>();
+  private activeEngines = new Map<string, CrawlEngine>();
   private maxConcurrentJobs = 2;
   private isProcessing = false;
 
@@ -59,15 +62,25 @@ export class BackgroundJobQueue extends EventEmitter {
     if (queueIndex >= 0) {
       this.queue.splice(queueIndex, 1);
       updateJobStatus(jobId, 'cancelled');
+      const j = activeJobs.get(jobId);
+      if (j) {
+        j.status = 'cancelled';
+        activeJobs.set(jobId, j);
+      }
       this.emit('job:cancelled', { jobId });
       return true;
     }
 
     // 2. Signal running engine
-    const activeEngine = this.activeJobs.get(jobId);
+    const activeEngine = this.activeEngines.get(jobId);
     if (activeEngine) {
       activeEngine.cancel();
       updateJobStatus(jobId, 'cancelled');
+      const j = activeJobs.get(jobId);
+      if (j) {
+        j.status = 'cancelled';
+        activeJobs.set(jobId, j);
+      }
       this.emit('job:cancelled', { jobId });
       return true;
     }
@@ -79,7 +92,7 @@ export class BackgroundJobQueue extends EventEmitter {
    * Check if a job is currently actively crawling
    */
   isRunning(jobId: string): boolean {
-    return this.activeJobs.has(jobId);
+    return this.activeEngines.has(jobId);
   }
 
   /**
@@ -90,7 +103,7 @@ export class BackgroundJobQueue extends EventEmitter {
     this.isProcessing = true;
 
     try {
-      while (this.activeJobs.size < this.maxConcurrentJobs && this.queue.length > 0) {
+      while (this.activeEngines.size < this.maxConcurrentJobs && this.queue.length > 0) {
         const nextJob = this.queue.shift();
         if (!nextJob) break;
 
@@ -144,7 +157,7 @@ export class BackgroundJobQueue extends EventEmitter {
       },
     });
 
-    this.activeJobs.set(job.id, engine);
+    this.activeEngines.set(job.id, engine);
 
     try {
       const result = await engine.run();
@@ -152,9 +165,40 @@ export class BackgroundJobQueue extends EventEmitter {
 
       if (result.status === 'cancelled') {
         updateJobStatus(job.id, 'cancelled');
+        const currentActive = activeJobs.get(job.id);
+        if (currentActive) {
+          currentActive.status = 'cancelled';
+          currentActive.completedAt = completedAt;
+          activeJobs.set(job.id, currentActive);
+        }
+        try {
+          const finalJobData = activeJobs.get(job.id);
+          if (finalJobData) {
+            await fs.writeFile(
+              path.join(job.outputDir, 'job.json'),
+              JSON.stringify(finalJobData, null, 2)
+            );
+          }
+        } catch {}
         this.emit(`completed:${job.id}`, { status: 'cancelled' });
       } else if (result.status === 'failed') {
         failJob(job.id, result.error || 'Unknown crawler failure');
+        const currentActive = activeJobs.get(job.id);
+        if (currentActive) {
+          currentActive.status = 'failed';
+          currentActive.error = result.error || 'Unknown crawler failure';
+          currentActive.completedAt = completedAt;
+          activeJobs.set(job.id, currentActive);
+        }
+        try {
+          const finalJobData = activeJobs.get(job.id);
+          if (finalJobData) {
+            await fs.writeFile(
+              path.join(job.outputDir, 'job.json'),
+              JSON.stringify(finalJobData, null, 2)
+            );
+          }
+        } catch {}
         this.emit(`completed:${job.id}`, { status: 'failed', error: result.error });
       } else {
         // Successful completion: generate manifest & intelligence
@@ -163,7 +207,17 @@ export class BackgroundJobQueue extends EventEmitter {
           const indexPath = path.join(job.outputDir, 'index.html');
           htmlSample = await fs.readFile(indexPath, 'utf-8');
         } catch {
-          // ignore if no index.html
+          // If no root index.html, check pages/ directory and link or copy first page
+          try {
+            const pagesDir = path.join(job.outputDir, 'pages');
+            const pageEntries = await fs.readdir(pagesDir);
+            const firstHtml = pageEntries.find(f => f.endsWith('.html') || f.endsWith('.htm'));
+            if (firstHtml) {
+              const srcPath = path.join(pagesDir, firstHtml);
+              htmlSample = await fs.readFile(srcPath, 'utf-8');
+              await fs.copyFile(srcPath, path.join(job.outputDir, 'index.html'));
+            }
+          } catch {}
         }
 
         const tech = detectTechnology(htmlSample);
@@ -223,14 +277,78 @@ export class BackgroundJobQueue extends EventEmitter {
           // ignore
         }
 
+        let hostname = 'mirrored-site';
+        try {
+          hostname = extractHostname(job.url) || new URL(job.url).hostname.replace(/^www\./, '');
+        } catch {}
+
+        // Create standalone runnable bundle (server.js, package.json, serve.py, README.md, etc.)
+        try {
+          const frameworkName = tech.frameworks?.[0]?.name;
+          const libraryNames = tech.libraries?.map(l => l.name).filter(Boolean).join(', ');
+          const detectedTech = frameworkName || libraryNames || undefined;
+
+          createCompleteRunnableBundle(job.outputDir, job.outputDir, hostname, {
+            url: job.url,
+            techStack: detectedTech,
+            pagesCount: result.counters.pagesDownloaded,
+            assetsCount: result.counters.assetsDownloaded,
+          });
+        } catch (e) {
+          console.warn('[Queue] Failed to create runnable bundle:', e);
+        }
+
         completeJob(job.id, manifest);
+
+        const currentActive = activeJobs.get(job.id);
+        if (currentActive) {
+          currentActive.status = 'completed';
+          currentActive.completedAt = completedAt;
+          activeJobs.set(job.id, currentActive);
+        } else {
+          activeJobs.set(job.id, {
+            id: job.id,
+            url: job.url,
+            hostname,
+            status: 'completed',
+            addedAt: startedAt,
+            completedAt,
+          });
+        }
+
+        try {
+          const finalJobData = activeJobs.get(job.id);
+          if (finalJobData) {
+            await fs.writeFile(
+              path.join(job.outputDir, 'job.json'),
+              JSON.stringify(finalJobData, null, 2)
+            );
+          }
+        } catch {}
+
         this.emit(`completed:${job.id}`, { status: 'completed', manifest });
       }
     } catch (err: any) {
       failJob(job.id, err.message);
+      const currentActive = activeJobs.get(job.id);
+      if (currentActive) {
+        currentActive.status = 'failed';
+        currentActive.error = err.message;
+        currentActive.completedAt = Date.now();
+        activeJobs.set(job.id, currentActive);
+      }
+      try {
+        const finalJobData = activeJobs.get(job.id);
+        if (finalJobData) {
+          await fs.writeFile(
+            path.join(job.outputDir, 'job.json'),
+            JSON.stringify(finalJobData, null, 2)
+          );
+        }
+      } catch {}
       this.emit(`completed:${job.id}`, { status: 'failed', error: err.message });
     } finally {
-      this.activeJobs.delete(job.id);
+      this.activeEngines.delete(job.id);
       // Process next waiting job
       this.processNext();
     }

@@ -155,7 +155,33 @@ import { getJob } from './db/client';
  * Used by routes that may be called after a server restart (hot reload).
  */
 export function ensureJobExists(id: string): boolean {
-  if (activeJobs.has(id)) return true;
+  if (activeJobs.has(id)) {
+    const job = activeJobs.get(id)!;
+    if (job.status !== 'completed' && job.status !== 'failed') {
+      try {
+        const dbRecord = getJob(id);
+        if (dbRecord && (dbRecord.status === 'completed' || dbRecord.status === 'failed')) {
+          job.status = dbRecord.status === 'completed' ? 'completed' : 'failed';
+          job.completedAt = dbRecord.completed_at || undefined;
+          if (dbRecord.error_message) job.error = dbRecord.error_message;
+          activeJobs.set(id, job);
+        } else {
+          const baseDir = getBaseDownloadDir(id);
+          const jobJsonPath = path.join(baseDir, 'job.json');
+          if (fs.existsSync(jobJsonPath)) {
+            const diskData = JSON.parse(fs.readFileSync(jobJsonPath, 'utf-8'));
+            if (diskData?.status === 'completed' || diskData?.status === 'failed') {
+              job.status = diskData.status;
+              job.completedAt = diskData.completedAt;
+              if (diskData.error) job.error = diskData.error;
+              activeJobs.set(id, job);
+            }
+          }
+        }
+      } catch {}
+    }
+    return true;
+  }
 
   // 1. Check persistent SQLite database
   try {

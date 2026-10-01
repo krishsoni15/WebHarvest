@@ -21,7 +21,42 @@ export async function GET(
   const writer = responseStream.writable.getWriter();
   const encoder = new TextEncoder();
 
-  // Send an initial progress payload
+  // Read latest log lines for real-time streaming
+  let initialLogs = '';
+  try {
+    const logFilePath = path.join(getBaseDownloadDir(id), 'crawl_logs.txt');
+    if (fs.existsSync(logFilePath)) {
+      const logStat = fs.statSync(logFilePath);
+      const tailBytes = Math.min(logStat.size, 64 * 1024);
+      if (logStat.size <= tailBytes) {
+        initialLogs = fs.readFileSync(logFilePath, 'utf-8');
+      } else {
+        const fd = fs.openSync(logFilePath, 'r');
+        const buffer = Buffer.alloc(tailBytes);
+        fs.readSync(fd, buffer, 0, tailBytes, logStat.size - tailBytes);
+        fs.closeSync(fd);
+        const text = buffer.toString('utf-8');
+        const firstNl = text.indexOf('\n');
+        initialLogs = firstNl >= 0 ? text.slice(firstNl + 1) : text;
+      }
+      const logLines = initialLogs.trim().split('\n');
+      initialLogs = logLines.slice(-100).join('\n');
+    }
+  } catch {}
+
+  // If logs already indicate crawl completed or failed, update job status immediately
+  if (job.status !== 'completed' && job.status !== 'failed') {
+    if (initialLogs.includes('Crawl completed') || initialLogs.includes('Offline mirror bundle ready')) {
+      job.status = 'completed';
+      job.completedAt = Date.now();
+      activeJobs.set(id, job);
+    } else if (initialLogs.includes('Fatal crawl error') || initialLogs.includes('Crawl failed')) {
+      job.status = 'failed';
+      activeJobs.set(id, job);
+    }
+  }
+
+  // Send initial progress payload
   const { stats: initialStats, recentFiles: initialRecent } = scanFolderStats(id, job.hostname);
   writer.write(
     encoder.encode(
@@ -32,11 +67,27 @@ export async function GET(
         recentFiles: initialRecent,
         hostname: job.hostname,
         url: job.url,
+        logs: initialLogs,
       })}\n\n`
     )
   );
 
+  // If job is already completed or failed, close stream immediately
+  if (job.status === 'completed' || job.status === 'failed') {
+    try {
+      writer.close();
+    } catch {}
+    return new Response(responseStream.readable, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+      },
+    });
+  }
+
   const interval = setInterval(async () => {
+    ensureJobExists(id);
     const currentJob = activeJobs.get(id);
     if (!currentJob) {
       clearInterval(interval);
@@ -72,6 +123,18 @@ export async function GET(
         recentLogs = logLines.slice(-100).join('\n');
       }
     } catch {}
+
+    // Check completion cues in logs
+    if (currentJob.status !== 'completed' && currentJob.status !== 'failed') {
+      if (recentLogs.includes('Crawl completed') || recentLogs.includes('Offline mirror bundle ready')) {
+        currentJob.status = 'completed';
+        currentJob.completedAt = Date.now();
+        activeJobs.set(id, currentJob);
+      } else if (recentLogs.includes('Fatal crawl error') || recentLogs.includes('Crawl failed')) {
+        currentJob.status = 'failed';
+        activeJobs.set(id, currentJob);
+      }
+    }
 
     try {
       writer.write(
