@@ -2,16 +2,9 @@ import { execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 
-// Ensure PLAYWRIGHT_BROWSERS_PATH has a persistent default if not provided
-if (!process.env.PLAYWRIGHT_BROWSERS_PATH) {
-  const localBrowsers = path.join(process.cwd(), 'node_modules', 'playwright-core', '.local-browsers');
-  if (fs.existsSync(localBrowsers)) {
-    process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
-  }
-}
-
 /**
  * Launch Chromium with automatic runtime installation if binary is missing.
+ * Installs both chromium and chromium-headless-shell to guarantee compatibility on Render/Linux.
  * Returns the Browser instance, or null if browser engine is entirely unsupported on host.
  */
 export async function launchChromiumSafe(
@@ -53,17 +46,15 @@ export async function launchChromiumSafe(
       msg.includes('chrome-headless-shell');
 
     if (isMissingExecutable) {
-      log('[PLAYWRIGHT] Chromium binary missing in runtime cache. Attempting on-the-fly installation...');
+      log('[PLAYWRIGHT] Chromium & Headless Shell binaries missing in runtime cache. Installing required browser packages...');
       try {
-        execSync('npx playwright install chromium', {
+        // Install both chromium and chromium-headless-shell in the default cache location
+        execSync('npx playwright install chromium chromium-headless-shell', {
           stdio: 'pipe',
-          timeout: 180000,
-          env: {
-            ...process.env,
-            PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH || '0',
-          },
+          timeout: 240000,
+          env: process.env,
         });
-        log('[PLAYWRIGHT] Chromium installed successfully! Retrying browser launch...');
+        log('[PLAYWRIGHT] Chromium and Headless Shell installed successfully! Retrying browser launch...');
         return await chromium.launch(launchConfig);
       } catch (installErr: any) {
         log(`[PLAYWRIGHT] Auto-install failed: ${installErr?.message || installErr}`);

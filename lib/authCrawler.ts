@@ -240,19 +240,58 @@ export function resolveVuexyConfig(inputUrl: string) {
     }
   } else if (isNextjs) {
     const nextRoutes = [
+      // 1. Dashboards
       `${baseUrl}/${currentDemo}/en/dashboards/analytics`,
       `${baseUrl}/${currentDemo}/en/dashboards/crm`,
       `${baseUrl}/${currentDemo}/en/dashboards/ecommerce`,
+      `${baseUrl}/${currentDemo}/en/dashboards/logistics`,
+      `${baseUrl}/${currentDemo}/en/dashboards/academy`,
+      // 2. Apps
       `${baseUrl}/${currentDemo}/en/apps/email`,
       `${baseUrl}/${currentDemo}/en/apps/chat`,
       `${baseUrl}/${currentDemo}/en/apps/calendar`,
       `${baseUrl}/${currentDemo}/en/apps/kanban`,
+      // 3. eCommerce
+      `${baseUrl}/${currentDemo}/en/apps/ecommerce/dashboard`,
+      `${baseUrl}/${currentDemo}/en/apps/ecommerce/products/list`,
+      `${baseUrl}/${currentDemo}/en/apps/ecommerce/products/add`,
+      `${baseUrl}/${currentDemo}/en/apps/ecommerce/orders/list`,
+      `${baseUrl}/${currentDemo}/en/apps/ecommerce/orders/details`,
+      `${baseUrl}/${currentDemo}/en/apps/ecommerce/customers/list`,
+      `${baseUrl}/${currentDemo}/en/apps/ecommerce/customers/details`,
+      `${baseUrl}/${currentDemo}/en/apps/ecommerce/manage-reviews`,
+      `${baseUrl}/${currentDemo}/en/apps/ecommerce/referrals`,
+      `${baseUrl}/${currentDemo}/en/apps/ecommerce/settings`,
+      // 4. Academy & Logistics
+      `${baseUrl}/${currentDemo}/en/apps/academy/dashboard`,
+      `${baseUrl}/${currentDemo}/en/apps/academy/my-courses`,
+      `${baseUrl}/${currentDemo}/en/apps/logistics/dashboard`,
+      `${baseUrl}/${currentDemo}/en/apps/logistics/fleet`,
+      // 5. Invoices
+      `${baseUrl}/${currentDemo}/en/apps/invoice/list`,
+      `${baseUrl}/${currentDemo}/en/apps/invoice/preview`,
+      `${baseUrl}/${currentDemo}/en/apps/invoice/edit`,
+      `${baseUrl}/${currentDemo}/en/apps/invoice/add`,
+      // 6. Users & Roles
+      `${baseUrl}/${currentDemo}/en/apps/user/list`,
+      `${baseUrl}/${currentDemo}/en/apps/user/view/account`,
+      `${baseUrl}/${currentDemo}/en/apps/user/view/security`,
+      `${baseUrl}/${currentDemo}/en/apps/user/view/billing-plans`,
+      `${baseUrl}/${currentDemo}/en/apps/roles`,
+      `${baseUrl}/${currentDemo}/en/apps/permissions`,
+      // 7. Pages
+      `${baseUrl}/${currentDemo}/en/pages/user-profile/profile`,
+      `${baseUrl}/${currentDemo}/en/pages/account-settings/account`,
+      `${baseUrl}/${currentDemo}/en/pages/faq`,
+      `${baseUrl}/${currentDemo}/en/pages/pricing`,
+      // 8. Auth Pages
       `${baseUrl}/${currentDemo}/en/login`,
       `${baseUrl}/${currentDemo}/en/register`,
       `${baseUrl}/${currentDemo}/en/forgot-password`,
+      // 9. Front Pages
       `${baseUrl}/${currentDemo}/en/front-pages/landing-page`,
-      `${baseUrl}/${currentDemo}/en/pages/faq`,
-      `${baseUrl}/${currentDemo}/en/pages/pricing`,
+      `${baseUrl}/${currentDemo}/en/front-pages/pricing`,
+      `${baseUrl}/${currentDemo}/en/front-pages/checkout`,
     ];
     for (const route of nextRoutes) {
       if (!targetPages.includes(route)) {
@@ -308,7 +347,8 @@ async function runHttpAuthFallback({
     const downloadedUrls = new Set<string>();
 
     const cheerio = require('cheerio');
-    const urlsToCrawl = [primaryUrl, ...targetPages.filter(p => p !== primaryUrl)].slice(0, Math.min(maxPages, 25));
+    const effectiveLimit = maxPages >= 50000 ? 500 : Math.max(maxPages, 100);
+    const urlsToCrawl = [primaryUrl, ...targetPages.filter(p => p !== primaryUrl)].slice(0, effectiveLimit);
 
     for (let idx = 0; idx < urlsToCrawl.length; idx++) {
       const pageUrl = urlsToCrawl[idx];
@@ -316,7 +356,7 @@ async function runHttpAuthFallback({
       downloadedUrls.add(pageUrl);
 
       try {
-        appendLog(`[HTTP CRAWL] Fetching page: ${pageUrl}`);
+        appendLog(`[HTTP CRAWL] (${savedPagesCount + 1}/${urlsToCrawl.length}) Fetching: ${pageUrl}`);
         const res = await fetch(pageUrl, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -332,6 +372,22 @@ async function runHttpAuthFallback({
 
         const html = await res.text();
         const $ = cheerio.load(html);
+
+        // Dynamically discover all internal <a> links on the target domain
+        $('a[href]').each((_: any, el: any) => {
+          const href = $(el).attr('href');
+          if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:')) return;
+          try {
+            const resolvedLink = new URL(href, pageUrl);
+            if (
+              (resolvedLink.hostname === hostname || resolvedLink.hostname.includes('pixinvent.com')) &&
+              urlsToCrawl.length < effectiveLimit &&
+              !urlsToCrawl.includes(resolvedLink.href)
+            ) {
+              urlsToCrawl.push(resolvedLink.href);
+            }
+          } catch {}
+        });
 
         // Extract and fetch assets
         const assetUrls: string[] = [];
@@ -414,7 +470,17 @@ async function runHttpAuthFallback({
         }
 
         const finalHtml = $.html();
-        const relativeHtmlName = idx === 0 ? 'index.html' : `page-${idx}.html`;
+        let relativeHtmlName = 'index.html';
+        if (idx !== 0) {
+          try {
+            const u = new URL(pageUrl);
+            let p = u.pathname.replace(/^\/+/, '').replace(/\.html$/i, '');
+            relativeHtmlName = p ? `${p}.html` : `page-${idx}.html`;
+          } catch {
+            relativeHtmlName = `page-${idx}.html`;
+          }
+        }
+
         const pageDiskPath = path.join(targetDir, relativeHtmlName);
         fs.mkdirSync(path.dirname(pageDiskPath), { recursive: true });
         fs.writeFileSync(pageDiskPath, finalHtml, 'utf8');
