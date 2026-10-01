@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: webharvest
+    runtime: node
+    plan: free
+    buildCommand: npm install && npx playwright install chromium && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: 0

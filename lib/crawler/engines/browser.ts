@@ -13,6 +13,7 @@
 import { chromium, Browser, BrowserContext } from 'playwright';
 import { ConcurrencyController } from '../concurrency';
 import { ApiRequestRecord } from '../../analysis/api';
+import { launchChromiumSafe } from '../playwrightHelper';
 
 export interface BrowserEngineConfig {
   headless?: boolean;
@@ -64,21 +65,15 @@ export class BrowserCrawler {
    */
   async ensureBrowser(): Promise<Browser> {
     if (!this.browser) {
-      this.browser = await chromium.launch({
+      const launched = await launchChromiumSafe(chromium, {
         headless: this.config.headless ?? true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--disable-blink-features=AutomationControlled',
-          '--no-first-run',
-          '--no-zygote',
-          '--disable-gpu',
-        ],
       });
+      if (!launched) {
+        throw new Error('Chromium browser engine is unavailable on this host environment. Falling back to HTTP crawler.');
+      }
+      this.browser = launched;
     }
-    return this.browser;
+    return this.browser as Browser;
   }
 
   /**

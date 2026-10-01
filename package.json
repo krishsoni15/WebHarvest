@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "postinstall": "npx playwright install chromium || true",
+    "build": "npx playwright install chromium && next build || next build",
     "start": "next start",
     "lint": "eslint",
     "crawl:auth": "node scripts/crawler_auth.cjs"
