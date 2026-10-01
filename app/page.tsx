@@ -19,6 +19,7 @@ interface RecentJob {
 
 export default function Home() {
   const [url, setUrl] = useState('');
+  const [maxPages, setMaxPages] = useState<number>(500);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [starCount, setStarCount] = useState<number | null>(null);
@@ -95,13 +96,26 @@ export default function Home() {
     setLoading(true);
     setError('');
 
+    // Automatically upgrade Vuexy marketing URL to the full live application demo
+    let targetCrawlUrl = url.trim();
+    if (targetCrawlUrl.includes('pixinvent.com') && targetCrawlUrl.includes('vuexy') && !targetCrawlUrl.includes('demos.pixinvent.com')) {
+      if (targetCrawlUrl.includes('nextjs')) {
+        targetCrawlUrl = 'https://demos.pixinvent.com/vuexy-nextjs-admin-template/demo-1/dashboards/analytics';
+      } else if (targetCrawlUrl.includes('html')) {
+        targetCrawlUrl = 'https://demos.pixinvent.com/vuexy-html-admin-template/html/vertical-menu-template/dashboards-analytics.html';
+      } else {
+        targetCrawlUrl = 'https://demos.pixinvent.com/vuexy-vuejs-admin-template/demo-1/dashboards/analytics';
+      }
+      setUrl(targetCrawlUrl);
+    }
+
     try {
       const response = await fetch('/api/mirror', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url: targetCrawlUrl, maxPages }),
       });
 
       let data: any = {};
@@ -242,6 +256,134 @@ export default function Home() {
               )}
             </button>
           </div>
+
+          {/* Crawler Capacity Settings & Runnable Bundle Indicator */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-1 text-xs text-neutral-400">
+            <div className="flex items-center flex-wrap gap-2">
+              <span className="text-neutral-500 font-medium">Page Limit:</span>
+              <div className="flex items-center bg-neutral-950 border border-neutral-800 rounded-lg p-0.5 shadow-inner flex-wrap gap-0.5">
+                {[50, 150, 500, 1000, 3000, 99999].map((limit) => (
+                  <button
+                    key={limit}
+                    type="button"
+                    onClick={() => setMaxPages(limit)}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all cursor-pointer ${
+                      maxPages === limit
+                        ? limit === 99999
+                          ? 'bg-amber-500/20 text-amber-300 shadow-sm border border-amber-500/50 font-bold'
+                          : 'bg-neutral-800 text-white shadow-sm border border-neutral-700/60'
+                        : limit === 99999
+                          ? 'text-amber-400/80 hover:text-amber-300'
+                          : 'text-neutral-500 hover:text-neutral-300'
+                    }`}
+                  >
+                    {limit === 500
+                      ? '500'
+                      : limit === 1000
+                      ? '1000'
+                      : limit === 3000
+                      ? '3000+'
+                      : limit === 99999
+                      ? '⚡ Unlimited (∞)'
+                      : `${limit}`}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1.5 ml-1">
+                <input
+                  type="text"
+                  value={maxPages >= 99999 ? '∞' : maxPages}
+                  onChange={(e) => {
+                    const val = e.target.value.trim();
+                    if (val === '∞' || val.toLowerCase().includes('unlimited') || val === '0') {
+                      setMaxPages(99999);
+                    } else {
+                      const num = parseInt(val.replace(/[^0-9]/g, ''));
+                      if (!isNaN(num)) {
+                        setMaxPages(Math.max(1, Math.min(99999, num)));
+                      } else if (val === '') {
+                        setMaxPages(500);
+                      }
+                    }
+                  }}
+                  className="w-16 h-7 px-2 rounded-md bg-neutral-950 border border-neutral-800 text-neutral-200 text-xs text-center focus:outline-none focus:border-neutral-600 font-mono font-semibold"
+                  title="Custom maximum pages to scrape (or ∞ for unlimited)"
+                />
+                <span className="text-[11px] text-neutral-500">custom max</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-emerald-400 text-[11px] font-medium bg-emerald-950/20 border border-emerald-900/30 px-3 py-1 rounded-lg">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Runnable Node.js & Python Bundle Included</span>
+            </div>
+          </div>
+
+          {/* Smart detection badge for Vuexy / Pixinvent SPA */}
+          {(url.toLowerCase().includes('vuexy') || url.toLowerCase().includes('pixinvent')) && (
+            <div className="space-y-2 text-left">
+              <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs sm:text-sm font-medium">
+                <Zap className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+                <span>
+                  <strong className="font-semibold text-amber-200">Vuexy Template Detected:</strong> WebHarvest will run the Playwright browser crawler with demo credentials & offline auth shield.
+                </span>
+              </div>
+              {/* If marketing page entered, offer quick demo links */}
+              {!url.includes('demos.pixinvent.com') && (
+                <div className="bg-neutral-900/90 border border-neutral-800 rounded-xl p-3 space-y-2.5 text-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <span className="text-neutral-300 font-medium">Marketing URL detected. Target the full live admin template:</span>
+                    <button
+                      type="button"
+                      onClick={() => setUrl('https://demos.pixinvent.com/vuexy-vuejs-admin-template/demo-1/dashboards/analytics')}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-semibold transition-colors cursor-pointer text-xs flex items-center justify-center gap-1.5 shrink-0 shadow-sm"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      Target Full 9 Apps Live Demo
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-neutral-400 pt-1.5 border-t border-neutral-800/60">
+                    <span className="text-neutral-500">Layout Demos:</span>
+                    <button
+                      type="button"
+                      onClick={() => setUrl('https://demos.pixinvent.com/vuexy-vuejs-admin-template/demo-1/dashboards/analytics')}
+                      className="px-2 py-0.5 rounded-md bg-neutral-950 border border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors cursor-pointer"
+                    >
+                      Demo 1 (Vertical)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUrl('https://demos.pixinvent.com/vuexy-vuejs-admin-template/demo-2/dashboards/crm')}
+                      className="px-2 py-0.5 rounded-md bg-neutral-950 border border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors cursor-pointer"
+                    >
+                      Demo 2 (Bordered)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUrl('https://demos.pixinvent.com/vuexy-vuejs-admin-template/demo-3/dashboards/ecommerce')}
+                      className="px-2 py-0.5 rounded-md bg-neutral-950 border border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors cursor-pointer"
+                    >
+                      Demo 3 (Semi Dark)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUrl('https://demos.pixinvent.com/vuexy-vuejs-admin-template/demo-4/dashboards/ecommerce')}
+                      className="px-2 py-0.5 rounded-md bg-neutral-950 border border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors cursor-pointer"
+                    >
+                      Demo 4 (Dark)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUrl('https://demos.pixinvent.com/vuexy-vuejs-admin-template/demo-5/dashboards/crm')}
+                      className="px-2 py-0.5 rounded-md bg-neutral-950 border border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors cursor-pointer"
+                    >
+                      Demo 5 (Horizontal)
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {error && (
             <p className="text-red-500 text-sm font-medium text-left px-1">

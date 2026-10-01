@@ -6,6 +6,7 @@ import os from 'os';
 import { activeJobs, activeProcesses, Job } from '@/lib/jobStore';
 import { getBaseDownloadDir } from '@/lib/resolveDir';
 import { runNativeMirror } from '@/lib/nativeMirror';
+import { runAuthCrawler } from '@/lib/authCrawler';
 
 // Rate limiting: max concurrent downloads
 const MAX_CONCURRENT_JOBS = 5;
@@ -77,6 +78,18 @@ export async function POST(req: NextRequest) {
       url = 'https://' + url;
     }
 
+    // Automatically map Vuexy marketing URLs (e.g. https://pixinvent.com/vuexy-vuetify-vuejs-admin-template)
+    // to the live template demo application on demos.pixinvent.com with all 9 apps & dashboards
+    if (url.toLowerCase().includes('pixinvent.com') && url.toLowerCase().includes('vuexy') && !url.toLowerCase().includes('demos.pixinvent.com')) {
+      if (url.toLowerCase().includes('nextjs')) {
+        url = 'https://demos.pixinvent.com/vuexy-nextjs-admin-template/demo-1/dashboards/analytics';
+      } else if (url.toLowerCase().includes('html')) {
+        url = 'https://demos.pixinvent.com/vuexy-html-admin-template/html/vertical-menu-template/dashboards-analytics.html';
+      } else {
+        url = 'https://demos.pixinvent.com/vuexy-vuejs-admin-template/demo-1/dashboards/analytics';
+      }
+    }
+
     // Validate URL format
     let parsedUrl: URL;
     try {
@@ -143,6 +156,34 @@ export async function POST(req: NextRequest) {
     try {
       fs.writeFileSync(path.join(downloadDir, 'job.json'), JSON.stringify(newJob, null, 2));
     } catch {}
+
+    // Automatically route Vuexy, Pixinvent, and SPA dashboard templates to the Playwright Authenticated Crawler
+    const isVuexyOrSpa = 
+      url.toLowerCase().includes('vuexy') || 
+      url.toLowerCase().includes('pixinvent.com') || 
+      url.toLowerCase().includes('admin-template') || 
+      url.toLowerCase().includes('dashboards') ||
+      !!body.authCrawler;
+
+    if (isVuexyOrSpa) {
+      const isUnlimited = body.maxPages === 0 || body.maxPages >= 99999;
+      const maxPages = isUnlimited 
+        ? 100000 
+        : typeof body.maxPages === 'number' && body.maxPages > 0 
+          ? Math.max(body.maxPages, 5) 
+          : 500;
+      runAuthCrawler({
+        id,
+        targetUrl: url,
+        downloadDir,
+        headless: true,
+        maxPages,
+      }).catch(err => {
+        console.error("Auth crawler background error:", err);
+      });
+
+      return NextResponse.json({ id });
+    }
 
     const isServerless = !!(process.env.VERCEL || process.env.NOW_BUILDER);
 

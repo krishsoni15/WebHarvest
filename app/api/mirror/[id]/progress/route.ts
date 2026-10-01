@@ -74,7 +74,7 @@ export async function GET(
         writer.close();
       } catch {}
     }
-  }, 1000);
+  }, 2000);
 
   req.signal.addEventListener('abort', () => {
     clearInterval(interval);
@@ -92,7 +92,15 @@ export async function GET(
   });
 }
 
+const statsCache = new Map<string, { time: number; data: { stats: any; recentFiles: any } }>();
+
 function scanFolderStats(id: string, hostname: string) {
+  const cached = statsCache.get(id);
+  const now = Date.now();
+  if (cached && (now - cached.time < 3500)) {
+    return cached.data;
+  }
+
   const targetDir = resolveTargetDir(id, hostname);
   const baseDir = getBaseDownloadDir(id);
 
@@ -161,5 +169,7 @@ function scanFolderStats(id: string, hostname: string) {
     size: f.size,
   }));
 
-  return { stats, recentFiles: latestFiles };
+  const result = { stats, recentFiles: latestFiles };
+  statsCache.set(id, { time: now, data: result });
+  return result;
 }
