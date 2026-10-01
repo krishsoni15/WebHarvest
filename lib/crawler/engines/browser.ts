@@ -52,6 +52,7 @@ export interface BrowserCrawlResult {
 export class BrowserCrawler {
   private browser: Browser | null = null;
   private timeoutMs: number;
+  private pagesServedCount = 0;
 
   constructor(
     private config: BrowserEngineConfig = {},
@@ -83,6 +84,12 @@ export class BrowserCrawler {
     url: string,
     captureScreenshot: boolean = false
   ): Promise<BrowserCrawlResult> {
+    this.pagesServedCount++;
+    // Periodically recycle Chromium process every 35 pages to prevent memory leaks on Render 512MB
+    if (this.pagesServedCount > 1 && this.pagesServedCount % 35 === 0) {
+      await this.close().catch(() => {});
+    }
+
     const browser = await this.ensureBrowser();
     const hostname = new URL(url).hostname;
 

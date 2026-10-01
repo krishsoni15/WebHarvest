@@ -366,8 +366,10 @@ async function runHttpAuthFallback({
     const downloadedUrls = new Set<string>();
 
     const cheerio = require('cheerio');
-    const effectiveLimit = maxPages >= 50000 ? 500 : Math.max(maxPages, 100);
+    const effectiveLimit = maxPages >= 50000 ? 10000 : Math.max(maxPages, 100);
     const urlsToCrawl = [primaryUrl, ...targetPages.filter(p => p !== primaryUrl)].slice(0, effectiveLimit);
+    const demoMatch = primaryUrl.match(/(demo-\d+)/i);
+    const activeDemoTag = demoMatch ? demoMatch[1].toLowerCase() : 'demo-1';
 
     for (let idx = 0; idx < urlsToCrawl.length; idx++) {
       const pageUrl = urlsToCrawl[idx];
@@ -398,8 +400,27 @@ async function runHttpAuthFallback({
           if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:')) return;
           try {
             const resolvedLink = new URL(href, pageUrl);
+            const isSameSite = (resolvedLink.hostname === hostname || resolvedLink.hostname.includes('pixinvent.com'));
+            const isDocOrOld = 
+              resolvedLink.pathname.includes('/documentation') || 
+              resolvedLink.pathname.includes('/docs/') || 
+              resolvedLink.pathname.includes('-old') || 
+              resolvedLink.pathname.includes('changelog') ||
+              resolvedLink.hostname.includes('tools.pixinvent.com') ||
+              resolvedLink.pathname.includes('laravel') ||
+              resolvedLink.pathname.includes('angular') ||
+              resolvedLink.pathname.includes('bootstrap');
+
+            // Restrict subpage discovery to active demo (e.g. demo-1) so we do not spider 600+ duplicate pages
+            const otherDemoMatch = resolvedLink.pathname.match(/(demo-\d+)/i);
+            const isOtherDemo = otherDemoMatch && otherDemoMatch[1].toLowerCase() !== activeDemoTag;
+
             if (
-              (resolvedLink.hostname === hostname || resolvedLink.hostname.includes('pixinvent.com')) &&
+              isSameSite &&
+              !isDocOrOld &&
+              !isOtherDemo &&
+              !resolvedLink.pathname.endsWith('.zip') &&
+              !resolvedLink.pathname.endsWith('.pdf') &&
               urlsToCrawl.length < effectiveLimit &&
               !urlsToCrawl.includes(resolvedLink.href)
             ) {
@@ -574,8 +595,8 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
 
   // Filter out heavy documentation docs and changelogs that cause collisions or crawl slowdowns
   const cleanTargetPages = autoConfig.targetPages.filter(p => 
-    !p.includes('/documentation/') && 
-    !p.includes('-old/') && 
+    !p.includes('/documentation') && 
+    !p.includes('-old') && 
     !p.includes('changelog')
   );
 

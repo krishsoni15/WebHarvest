@@ -249,6 +249,8 @@ export async function POST(req: NextRequest) {
       let captureRules = body.captureRules;
       let limits = body.limits || {};
 
+      const userMaxPages = body.limits?.maxPages ?? body.maxPages;
+
       if (body.preset && CAPTURE_PRESETS[body.preset]) {
         const p = CAPTURE_PRESETS[body.preset];
         mode = body.mode || p.engine;
@@ -262,8 +264,13 @@ export async function POST(req: NextRequest) {
           ...(captureRules || {}),
         };
         limits = {
-          maxPages: p.maxPages,
+          maxPages: userMaxPages ?? p.maxPages,
           maxDepth: p.maxDepth,
+          ...limits,
+        };
+      } else if (userMaxPages) {
+        limits = {
+          maxPages: userMaxPages,
           ...limits,
         };
       }

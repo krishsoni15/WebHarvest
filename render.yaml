@@ -3,7 +3,7 @@ services:
     name: webharvest
     runtime: node
     plan: free
-    buildCommand: PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium chromium-headless-shell && npm install && npm run build
+    buildCommand: npm install && PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install --with-deps chromium chromium-headless-shell && npm run build
     startCommand: next start -H 0.0.0.0 -p $PORT
     envVars:
       - key: NODE_VERSION

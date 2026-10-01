@@ -90,8 +90,8 @@ export const CAPTURE_PRESETS: Record<string, CapturePreset> = {
     name: '🏆 Full',
     tagline: 'Deep browser capture',
     scopeMode: 'full',
-    maxDepth: 5,
-    maxPages: 1000,
+    maxDepth: 10,
+    maxPages: 50000,
     engine: 'browser',
     captureRules: {
       html: true,
@@ -115,8 +115,8 @@ export const CAPTURE_PRESETS: Record<string, CapturePreset> = {
     name: '🔥 MAX CAPTURE',
     tagline: 'Maximum capture engine',
     scopeMode: 'full',
-    maxDepth: 5,
-    maxPages: 5000,
+    maxDepth: 10,
+    maxPages: 50000,
     engine: 'auto',
     captureRules: {
       html: true,

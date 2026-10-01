@@ -272,18 +272,45 @@ export class CrawlEngine {
               htmlContent.includes('Attention Required! | Cloudflare');
 
             if (isBlockedOrChallenge) {
+              if (httpRes.status === 429) {
+                await new Promise((r) => setTimeout(r, 1200));
+              }
               this.options.onLog?.(
                 `Anti-bot / 403 block detected on ${item.url} (status: ${httpRes.status}). Escalating to stealth Playwright browser...`,
                 'warn'
               );
-              processed = await this.fetchWithBrowser(item);
+              try {
+                processed = await this.fetchWithBrowser(item);
+              } catch (browserErr: any) {
+                this.options.onLog?.(
+                  `Browser fallback unavailable (${browserErr.message}). Saving raw HTTP snapshot...`,
+                  'warn'
+                );
+                processed = await this.processor.process(
+                  httpRes.url,
+                  httpRes.buffer,
+                  httpRes.contentType,
+                  httpRes.status,
+                  item.discoveredFrom
+                );
+              }
             } else {
               const detect = needsBrowserRendering(htmlContent);
               if (detect.needed) {
                 this.options.onLog?.(
                   `SPA detected on ${item.url} (${detect.reasons.join(', ')}). Escalating to Playwright.`
                 );
-                processed = await this.fetchWithBrowser(item);
+                try {
+                  processed = await this.fetchWithBrowser(item);
+                } catch {
+                  processed = await this.processor.process(
+                    httpRes.url,
+                    httpRes.buffer,
+                    httpRes.contentType,
+                    httpRes.status,
+                    item.discoveredFrom
+                  );
+                }
               } else {
                 processed = await this.processor.process(
                   httpRes.url,
@@ -295,10 +322,20 @@ export class CrawlEngine {
               }
             }
           } catch {
-            processed = await this.fetchWithBrowser(item);
+            try {
+              processed = await this.fetchWithBrowser(item);
+            } catch (err: any) {
+              this.options.onLog?.(`Failed to fetch ${item.url}: ${err?.message || err}`, 'warn');
+              return;
+            }
           }
         } else {
-          processed = await this.fetchWithBrowser(item);
+          try {
+            processed = await this.fetchWithBrowser(item);
+          } catch (err: any) {
+            this.options.onLog?.(`Failed to fetch ${item.url}: ${err?.message || err}`, 'warn');
+            return;
+          }
         }
       } else {
         try {
