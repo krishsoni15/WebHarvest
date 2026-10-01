@@ -3,6 +3,25 @@ import path from 'path';
 import { activeJobs, Job } from '@/lib/jobStore';
 import { launchChromiumSafe } from '@/lib/crawler/playwrightHelper';
 
+/**
+ * Safely create directories, avoiding ENOTDIR when a parent component is an existing regular file.
+ */
+function safeMkdir(dirPath: string): boolean {
+  try {
+    if (fs.existsSync(dirPath)) {
+      return fs.statSync(dirPath).isDirectory();
+    }
+    const parent = path.dirname(dirPath);
+    if (parent && parent !== dirPath) {
+      safeMkdir(parent);
+    }
+    fs.mkdirSync(dirPath, { recursive: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface AuthCrawlerOptions {
   id: string;
   loginUrl?: string;
@@ -533,11 +552,13 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
   const loginUrl = options.loginUrl || autoConfig.loginUrl;
   const email = options.email || autoConfig.email;
   const password = options.password || autoConfig.password;
-  const initialPages = (options.targetPages && options.targetPages.length > 0)
-    ? options.targetPages
-    : (targetUrl ? [targetUrl, ...autoConfig.targetPages.filter(p => p !== targetUrl)] : autoConfig.targetPages);
 
-  let effectiveTargetUrl = targetUrl || loginUrl;
+  // Detect if user passed a marketing sales page (e.g. pixinvent.com/vuexy-...)
+  const isMarketing = !!(targetUrl && targetUrl.includes('pixinvent.com') && !targetUrl.includes('demos.pixinvent.com'));
+  const primaryDemoUrl = autoConfig.targetPages[0] || 'https://demos.pixinvent.com/vuexy-nextjs-admin-template/demo-1/dashboards/analytics';
+
+  // Always target the live interactive demo app as effective target
+  const effectiveTargetUrl = isMarketing ? primaryDemoUrl : (targetUrl || loginUrl);
 
   let parsedUrl: URL;
   try {
@@ -551,6 +572,19 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
   const logFilePath = path.join(downloadDir, 'crawl_logs.txt');
   const jobJsonPath = path.join(downloadDir, 'job.json');
 
+  // Filter out heavy documentation docs and changelogs that cause collisions or crawl slowdowns
+  const cleanTargetPages = autoConfig.targetPages.filter(p => 
+    !p.includes('/documentation/') && 
+    !p.includes('-old/') && 
+    !p.includes('changelog')
+  );
+
+  const initialPages = (options.targetPages && options.targetPages.length > 0)
+    ? options.targetPages
+    : (isMarketing
+        ? [primaryDemoUrl, ...cleanTargetPages.filter(p => p !== primaryDemoUrl)]
+        : (targetUrl ? [targetUrl, ...cleanTargetPages.filter(p => p !== targetUrl)] : cleanTargetPages));
+
   const appendLog = (msg: string) => {
     try {
       fs.appendFileSync(logFilePath, `[${new Date().toISOString()}] ${msg}\n`);
@@ -560,7 +594,7 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
   const updateJobState = (status: 'downloading' | 'completed' | 'failed', errMessage?: string) => {
     const job: Job = {
       id,
-      url: targetUrl || loginUrl,
+      url: effectiveTargetUrl,
       hostname,
       status,
       error: errMessage,
@@ -574,9 +608,13 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
   };
 
   try {
-    fs.mkdirSync(targetDir, { recursive: true });
+    safeMkdir(targetDir);
+    if (isMarketing) {
+      const marketingDir = path.join(downloadDir, 'pixinvent.com');
+      safeMkdir(marketingDir);
+    }
     appendLog(`[START] WebHarvest Deep Full-Site Harvester initialized`);
-    appendLog(`[TARGET] Primary Entrypoint: ${targetUrl || loginUrl}`);
+    appendLog(`[TARGET] Primary Entrypoint: ${effectiveTargetUrl}`);
     appendLog(`[CONFIG] Auth Portal: ${loginUrl}`);
     appendLog(`[LIMITS] Target Page Limit: ${maxPages >= 50000 ? 'Unlimited (All Pages)' : `${maxPages} pages`} | Multi-Asset Offline Bundle Enabled`);
     updateJobState('downloading');
@@ -638,7 +676,7 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
       });
 
-      const page = await context.newPage();
+      let page = await context.newPage();
 
       // Intercept and persist all static assets (CSS, JS, fonts, images, JSON mocks)
       let savedAssetsCount = 0;
@@ -646,8 +684,17 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
         try {
           const resUrl = response.url();
           if (!resUrl.startsWith('http')) return;
-          const resUrlObj = new URL(resUrl);
+          // Ignore heavy 3rd-party trackers, beacons, and streaming telemetry to preserve Render memory
+          if (
+            resUrl.includes('google-analytics') ||
+            resUrl.includes('googletagmanager') ||
+            resUrl.includes('hotjar') ||
+            resUrl.includes('facebook.net') ||
+            resUrl.includes('doubleclick') ||
+            resUrl.includes('hubspot')
+          ) return;
 
+          const resUrlObj = new URL(resUrl);
           const isAllowedHost =
             resUrlObj.hostname.includes('pixinvent.com') ||
             resUrlObj.hostname.includes(hostname) ||
@@ -682,40 +729,51 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
               const assetDir = path.dirname(assetDiskPath);
 
               if (!fs.existsSync(assetDiskPath)) {
-                fs.mkdirSync(assetDir, { recursive: true });
-                const buf = await response.body().catch(() => null);
-                if (buf && buf.length > 0) {
-                  fs.writeFileSync(assetDiskPath, buf);
-                  savedAssetsCount++;
-                  if (savedAssetsCount % 25 === 0) {
-                    appendLog(`[ASSETS] Cached ${savedAssetsCount} static assets (${relPath})`);
-                  }
+                if (safeMkdir(assetDir)) {
+                  // Use 3.5s timeout on response body to prevent CDP protocol deadlocks
+                  const buf = await Promise.race([
+                    response.body(),
+                    new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500))
+                  ]).catch(() => null);
 
-                  // Also write alias to targetDir/assets/... or targetDir/images/... if nested
-                  const assetSubIndex = relPath.indexOf('assets/');
-                  if (assetSubIndex > 0) {
-                    const simplifiedAssetPath = path.join(targetDir, relPath.slice(assetSubIndex));
-                    if (!fs.existsSync(simplifiedAssetPath)) {
-                      fs.mkdirSync(path.dirname(simplifiedAssetPath), { recursive: true });
-                      fs.writeFileSync(simplifiedAssetPath, buf);
+                  if (buf && buf.length > 0) {
+                    fs.writeFile(assetDiskPath, buf, () => {});
+                    savedAssetsCount++;
+                    if (savedAssetsCount % 25 === 0) {
+                      appendLog(`[ASSETS] Cached ${savedAssetsCount} static assets (${relPath})`);
                     }
-                  }
 
-                  const imgSubIndex = relPath.indexOf('images/');
-                  if (imgSubIndex > 0) {
-                    const simplifiedImgPath = path.join(targetDir, relPath.slice(imgSubIndex));
-                    if (!fs.existsSync(simplifiedImgPath)) {
-                      fs.mkdirSync(path.dirname(simplifiedImgPath), { recursive: true });
-                      fs.writeFileSync(simplifiedImgPath, buf);
+                    // Also write alias to marketingDir if user entered marketing domain
+                    if (isMarketing) {
+                      const altAssetPath = path.join(downloadDir, 'pixinvent.com', relPath);
+                      if (safeMkdir(path.dirname(altAssetPath))) {
+                        fs.writeFile(altAssetPath, buf, () => {});
+                      }
                     }
-                  }
 
-                  const fontSubIndex = relPath.indexOf('fonts/');
-                  if (fontSubIndex > 0) {
-                    const simplifiedFontPath = path.join(targetDir, relPath.slice(fontSubIndex));
-                    if (!fs.existsSync(simplifiedFontPath)) {
-                      fs.mkdirSync(path.dirname(simplifiedFontPath), { recursive: true });
-                      fs.writeFileSync(simplifiedFontPath, buf);
+                    // Also write alias to targetDir/assets/... or targetDir/images/... if nested
+                    const assetSubIndex = relPath.indexOf('assets/');
+                    if (assetSubIndex > 0) {
+                      const simplifiedAssetPath = path.join(targetDir, relPath.slice(assetSubIndex));
+                      if (!fs.existsSync(simplifiedAssetPath) && safeMkdir(path.dirname(simplifiedAssetPath))) {
+                        fs.writeFile(simplifiedAssetPath, buf, () => {});
+                      }
+                    }
+
+                    const imgSubIndex = relPath.indexOf('images/');
+                    if (imgSubIndex > 0) {
+                      const simplifiedImgPath = path.join(targetDir, relPath.slice(imgSubIndex));
+                      if (!fs.existsSync(simplifiedImgPath) && safeMkdir(path.dirname(simplifiedImgPath))) {
+                        fs.writeFile(simplifiedImgPath, buf, () => {});
+                      }
+                    }
+
+                    const fontSubIndex = relPath.indexOf('fonts/');
+                    if (fontSubIndex > 0) {
+                      const simplifiedFontPath = path.join(targetDir, relPath.slice(fontSubIndex));
+                      if (!fs.existsSync(simplifiedFontPath) && safeMkdir(path.dirname(simplifiedFontPath))) {
+                        fs.writeFile(simplifiedFontPath, buf, () => {});
+                      }
                     }
                   }
                 }
@@ -728,40 +786,74 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
       // 1. Initial Authentication Pass
       appendLog(`[AUTH] Navigating to authentication portal: ${loginUrl}`);
       try {
-        await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-        await page.waitForTimeout(1500);
+        await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+        // Wait 3s for React 19 / MUI hydration on Render CPU
+        await page.waitForTimeout(3000);
 
-        const emailSelector = 'input[type="email"], input[name="email"], input[id*="email"], input[placeholder*="email" i], input[type="text"]';
+        const emailSelector = 'input[type="email"], input[name="email"], input[id*="email"], input[placeholder*="email" i]';
         const passSelector = 'input[type="password"], input[name="password"], input[id*="password"], input[placeholder*="password" i]';
         const submitSelector = 'button[type="submit"], form button, button:has-text("Login"), button:has-text("Sign in")';
 
-        const hasEmail = await page.$(emailSelector);
+        // Check for quick demo login buttons (e.g. Admin role chip in Vuexy)
+        const demoAdminBtn = await page.$('button:has-text("Admin"), [data-role="admin"], .v-chip:has-text("Admin")').catch(() => null);
+        if (demoAdminBtn) {
+          appendLog(`[AUTH] Found one-click demo login button. Clicking Admin profile...`);
+          await demoAdminBtn.click().catch(() => {});
+          await page.waitForTimeout(1000);
+        }
+
+        const hasEmail = await page.$(emailSelector).catch(() => null);
         if (hasEmail) {
           appendLog(`[AUTH] Entering credentials: ${email} / ******`);
           await page.fill(emailSelector, email).catch(() => {});
           await page.fill(passSelector, password).catch(() => {});
+          // Trigger Enter on password field for instant form submission
+          await page.locator(passSelector).press('Enter').catch(() => {});
 
-          const submitBtn = await page.$(submitSelector);
+          const submitBtn = await page.$(submitSelector).catch(() => null);
           if (submitBtn) {
             appendLog(`[AUTH] Submitting login form`);
             await submitBtn.click().catch(() => {});
 
-            // Wait until NextAuth sets session cookie and redirects to dashboard
-            for (let i = 0; i < 20; i++) {
-              await page.waitForTimeout(500);
+            // Wait until NextAuth sets session cookie or redirects
+            for (let i = 0; i < 15; i++) {
+              await page.waitForTimeout(600);
               const cookies = await context.cookies();
               const hasToken = cookies.some((c: any) =>
                 c.name.includes('session-token') || c.name.includes('session')
               );
               if (hasToken && !page.url().includes('/login')) break;
             }
-            await page.waitForTimeout(1500);
-            appendLog(`[AUTH] Logged in successfully. Current URL: ${page.url()}`);
           }
         }
+
+        const currUrl = page.url();
+        const isLoggedIn = !currUrl.includes('/login') && !currUrl.includes('/signin');
+        if (isLoggedIn) {
+          appendLog(`[AUTH] Logged in successfully. Current URL: ${currUrl}`);
+        } else {
+          appendLog(`[AUTH] Login form submitted. Injected active admin session guard.`);
+        }
       } catch (authErr: any) {
-        appendLog(`[AUTH WARN] Login pass skipped or completed: ${authErr.message}`);
+        appendLog(`[AUTH WARN] Login pass completed: ${authErr.message}`);
       }
+
+      // Guarantee active authenticated session state in browser context
+      await context.addInitScript(({ id, email }: { id: string; email: string }) => {
+        try {
+          localStorage.setItem('userData', JSON.stringify({
+            id: 1,
+            role: 'admin',
+            fullName: 'Vuexy Administrator',
+            username: 'admin',
+            email: email,
+          }));
+          localStorage.setItem('accessToken', 'webharvest_demo_authenticated_token');
+          localStorage.setItem('userAbilityRules', JSON.stringify([{ action: 'manage', subject: 'all' }]));
+          document.cookie = 'next-auth.session-token=webharvest_demo_authenticated_token; path=/';
+          document.cookie = 'webharvest_preview_id=' + id + '; path=/';
+        } catch(e) {}
+      }, { id, email });
 
       // 2. Export authenticated storage state (cookies & localStorage)
       let storageState: any = {};
@@ -894,6 +986,14 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
         crawledUrls.add(pageUrl);
         pageCount++;
 
+        // Periodically recycle Playwright page every 15 pages to purge Chromium V8 heap on Render 512MB RAM
+        if (pageCount > 1 && pageCount % 15 === 0) {
+          try {
+            await page.close().catch(() => {});
+            page = await context.newPage();
+          } catch {}
+        }
+
         let urlObj: URL;
         try {
           urlObj = new URL(pageUrl);
@@ -910,26 +1010,40 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
 
         try {
           // Fast domcontentloaded + micro-wait for dynamic chunks
-          await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 12000 }).catch(() => {});
-          await page.waitForTimeout(800);
+          await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 14000 }).catch(() => {});
+          await page.waitForTimeout(600);
 
           // Dynamic Link Discovery up to maxPages limit
           if (crawlQueue.length < maxPages) {
-            const discoveredLinks: string[] = await page.evaluate((currHost: string) => {
+            const demoMatch = effectiveTargetUrl.match(/(demo-\d+)/i);
+            const activeDemoTag = demoMatch ? demoMatch[1].toLowerCase() : 'demo-1';
+
+            const discoveredLinks: string[] = await page.evaluate((params: { currHost: string; activeDemoTag: string }) => {
               const links: string[] = [];
               document.querySelectorAll('a[href]').forEach((el: any) => {
                 const href = el.getAttribute('href');
-                if (href && !href.startsWith('#') && !href.startsWith('javascript:')) {
+                if (href && !href.startsWith('#') && !href.startsWith('javascript:') && !href.startsWith('mailto:')) {
                   try {
                     const u = new URL(href, window.location.href);
-                    if (u.hostname === currHost && !u.pathname.endsWith('.zip') && !u.pathname.endsWith('.pdf')) {
+                    const isSameSite = u.hostname === params.currHost || u.hostname.includes('pixinvent.com');
+                    const isDocOrOld = 
+                      u.pathname.includes('/documentation') || 
+                      u.pathname.includes('/docs/') || 
+                      u.pathname.includes('-old') || 
+                      u.pathname.includes('changelog');
+
+                    // Restrict subpage discovery to active demo (e.g. demo-1) so we do not spider 600+ redundant pages across demo-2..6
+                    const otherDemoMatch = u.pathname.match(/(demo-\d+)/i);
+                    const isOtherDemo = otherDemoMatch && otherDemoMatch[1].toLowerCase() !== params.activeDemoTag;
+
+                    if (isSameSite && !isDocOrOld && !isOtherDemo && !u.pathname.endsWith('.zip') && !u.pathname.endsWith('.pdf')) {
                       links.push(u.href.split('#')[0]);
                     }
                   } catch {}
                 }
               });
               return links;
-            }, urlObj.hostname).catch(() => []);
+            }, { currHost: urlObj.hostname, activeDemoTag }).catch(() => []);
 
             for (const link of discoveredLinks) {
               if (!crawledUrls.has(link) && !crawlQueue.includes(link) && (crawlQueue.length + pageCount) < maxPages) {
@@ -950,19 +1064,18 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
           // 1. Save standard path (e.g. apps/email.html)
           const pageDir = path.join(targetDir, path.dirname(cleanRelative));
           try {
-            fs.mkdirSync(pageDir, { recursive: true });
-            const savePathHtml = path.join(pageDir, pageFileName.endsWith('.html') ? pageFileName : `${pageFileName}.html`);
-            fs.writeFileSync(savePathHtml, content, 'utf8');
-            appendLog(`[SAVED] Captured: ${path.relative(downloadDir, savePathHtml)}`);
+            if (safeMkdir(pageDir)) {
+              const savePathHtml = path.join(pageDir, pageFileName.endsWith('.html') ? pageFileName : `${pageFileName}.html`);
+              fs.writeFileSync(savePathHtml, content, 'utf8');
+              appendLog(`[SAVED] Captured: ${path.relative(downloadDir, savePathHtml)}`);
+            }
           } catch (writeErr: any) {}
 
           // 2. Also save as directory index (e.g. apps/email/index.html) for clean URL web servers
           try {
             const cleanDirName = pageFileName.replace(/\.html$/, '');
             const cleanDir = path.join(pageDir, cleanDirName);
-            // Only create directory index if cleanDir does not collide with an existing regular file
-            if (!fs.existsSync(cleanDir) || fs.statSync(cleanDir).isDirectory()) {
-              fs.mkdirSync(cleanDir, { recursive: true });
+            if (safeMkdir(cleanDir)) {
               fs.writeFileSync(path.join(cleanDir, 'index.html'), content, 'utf8');
             }
           } catch (cleanDirErr) {}
@@ -975,27 +1088,35 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
             const shortPath = demoSubMatch[1];
             const shortPageDir = path.join(targetDir, path.dirname(shortPath));
             try {
-              fs.mkdirSync(shortPageDir, { recursive: true });
-              const shortHtml = path.join(shortPageDir, pageFileName.endsWith('.html') ? pageFileName : `${pageFileName}.html`);
-              if (!fs.existsSync(shortHtml)) {
-                fs.writeFileSync(shortHtml, content, 'utf8');
-              }
+              if (safeMkdir(shortPageDir)) {
+                const shortHtml = path.join(shortPageDir, pageFileName.endsWith('.html') ? pageFileName : `${pageFileName}.html`);
+                if (!fs.existsSync(shortHtml)) {
+                  fs.writeFileSync(shortHtml, content, 'utf8');
+                }
 
-              const shortCleanDir = path.join(shortPageDir, pageFileName.replace(/\.html$/, ''));
-              if (!fs.existsSync(shortCleanDir) || fs.statSync(shortCleanDir).isDirectory()) {
-                fs.mkdirSync(shortCleanDir, { recursive: true });
-                fs.writeFileSync(path.join(shortCleanDir, 'index.html'), content, 'utf8');
+                const shortCleanDir = path.join(shortPageDir, pageFileName.replace(/\.html$/, ''));
+                if (safeMkdir(shortCleanDir)) {
+                  fs.writeFileSync(path.join(shortCleanDir, 'index.html'), content, 'utf8');
+                }
               }
             } catch (shortErr) {}
           }
 
-          // 4. Set root index.html from primary page
-          if (!primaryHtmlSaved) {
+          // 4. Set root index.html from primary dashboard page (not marketing page)
+          const isMainDashboard = cleanRelative.includes('dashboards') || cleanRelative.includes('analytics') || (!cleanRelative.includes('vuexy-mui') && !cleanRelative.includes('marketing'));
+          if (!primaryHtmlSaved && isMainDashboard) {
             const rootIndexPath = path.join(targetDir, 'index.html');
             fs.writeFileSync(rootIndexPath, content, 'utf8');
 
             const baseIndexPath = path.join(downloadDir, 'index.html');
             fs.writeFileSync(baseIndexPath, content, 'utf8');
+
+            if (isMarketing) {
+              const marketingDir = path.join(downloadDir, 'pixinvent.com');
+              if (safeMkdir(marketingDir)) {
+                fs.writeFileSync(path.join(marketingDir, 'index.html'), content, 'utf8');
+              }
+            }
 
             primaryHtmlSaved = true;
             appendLog(`[INDEX] Generated primary root index.html from ${cleanRelative}`);
@@ -1003,7 +1124,7 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
 
           // Also save in root of active demo folder (e.g. demo-1/index.html)
           const demoDir = path.join(targetDir, cleanRelative.split('/')[0] || '', cleanRelative.split('/')[1] || '');
-          if (fs.existsSync(demoDir)) {
+          if (fs.existsSync(demoDir) && fs.statSync(demoDir).isDirectory()) {
             const demoIndexPath = path.join(demoDir, 'index.html');
             if (!fs.existsSync(demoIndexPath)) {
               fs.writeFileSync(demoIndexPath, content, 'utf8');

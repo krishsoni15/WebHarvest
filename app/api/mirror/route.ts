@@ -6,7 +6,7 @@ import os from 'os';
 import { activeJobs, activeProcesses, Job } from '@/lib/jobStore';
 import { getBaseDownloadDir } from '@/lib/resolveDir';
 import { runNativeMirror } from '@/lib/nativeMirror';
-import { runAuthCrawler } from '@/lib/authCrawler';
+import { runAuthCrawler, resolveVuexyConfig } from '@/lib/authCrawler';
 
 import { validateURL } from '@/lib/security/validate-url';
 import { dnsGuard } from '@/lib/security/dns-guard';
@@ -198,11 +198,23 @@ export async function POST(req: NextRequest) {
       !!body.authCrawler;
 
     if (isVuexyOrSpa) {
+      const autoConfig = resolveVuexyConfig(url);
+      const isMarketing = url.includes('pixinvent.com') && !url.includes('demos.pixinvent.com');
+      const effectiveEntryUrl = isMarketing ? (autoConfig.targetPages[0] || autoConfig.loginUrl) : url;
+      let effectiveHost = resolvedHostname;
+      try {
+        effectiveHost = new URL(effectiveEntryUrl).hostname;
+      } catch {}
+
+      newJob.hostname = effectiveHost;
+      newJob.url = effectiveEntryUrl;
+      activeJobs.set(id, newJob);
+
       try {
         dbCreateJob({
           id,
-          url,
-          hostname: resolvedHostname,
+          url: effectiveEntryUrl,
+          hostname: effectiveHost,
           mode: 'playwright',
           download_dir: downloadDir,
           crawl_config: {
@@ -220,7 +232,7 @@ export async function POST(req: NextRequest) {
         : Math.max(requestedLimit, 1000);
       runAuthCrawler({
         id,
-        targetUrl: url,
+        targetUrl: effectiveEntryUrl,
         downloadDir,
         headless: true,
         maxPages,

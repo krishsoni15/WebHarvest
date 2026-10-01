@@ -4,6 +4,7 @@ import path from 'path';
 import { getBaseDownloadDir } from '@/lib/resolveDir';
 import { activeJobs } from '@/lib/jobStore';
 import { runAuthCrawler, resolveVuexyConfig } from '@/lib/authCrawler';
+import { launchChromiumSafe } from '@/lib/crawler/playwrightHelper';
 
 export async function POST(
   req: NextRequest,
@@ -58,16 +59,13 @@ export async function POST(
     }
 
     const { chromium } = playwright;
-    const browser = await chromium.launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-web-security',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-features=IsolateOrigins,site-per-process',
-      ],
-    });
+    const browser = await launchChromiumSafe(chromium, { headless: true });
+    if (!browser) {
+      return NextResponse.json(
+        { error: 'Chromium browser failed to launch on this container' },
+        { status: 500 }
+      );
+    }
 
     const browserContext = await browser.newContext({
       userAgent:

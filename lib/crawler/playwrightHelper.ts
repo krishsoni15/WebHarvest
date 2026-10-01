@@ -21,12 +21,19 @@ export async function launchChromiumSafe(
     '--disable-setuid-sandbox',
     '--disable-dev-shm-usage',
     '--disable-gpu',
+    '--disable-software-rasterizer',
     '--no-first-run',
     '--no-zygote',
-    '--single-process',
     '--disable-web-security',
     '--disable-blink-features=AutomationControlled',
     '--disable-features=IsolateOrigins,site-per-process',
+    '--disable-extensions',
+    '--disable-background-networking',
+    '--disable-default-apps',
+    '--disable-sync',
+    '--no-default-browser-check',
+    '--mute-audio',
+    '--js-flags=--max-old-space-size=128',
     ...(options.extraArgs || []),
   ];
 
@@ -48,11 +55,15 @@ export async function launchChromiumSafe(
     if (isMissingExecutable) {
       log('[PLAYWRIGHT] Chromium & Headless Shell binaries missing in runtime cache. Installing required browser packages...');
       try {
-        // Install both chromium and chromium-headless-shell in the default cache location
+        const installEnv = {
+          ...process.env,
+          PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH || '0',
+        };
+        // Install both chromium and chromium-headless-shell in the designated location
         execSync('npx playwright install chromium chromium-headless-shell', {
           stdio: 'pipe',
           timeout: 240000,
-          env: process.env,
+          env: installEnv,
         });
         log('[PLAYWRIGHT] Chromium and Headless Shell installed successfully! Retrying browser launch...');
         return await chromium.launch(launchConfig);
