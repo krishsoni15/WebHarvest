@@ -122,6 +122,11 @@ export class HttpCrawler {
           continue;
         }
 
+        // Rate limited (429): trigger host cooldown to prevent flooding server
+        if (fetchResult.status === 429) {
+          this.concurrency.recordRateLimit(hostname, 3000);
+        }
+
         // Anti-bot / 403 forbidden fallback: rotate user agent
         if (fetchResult.status === 403) {
           for (const fallbackUa of FALLBACK_USER_AGENTS) {

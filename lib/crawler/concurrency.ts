@@ -29,6 +29,7 @@ export class ConcurrencyController {
   private config: ConcurrencyConfig;
   private globalActive = 0;
   private hostActive: Map<string, number> = new Map();
+  private hostCooldown: Map<string, number> = new Map();
   private browserActive = 0;
   private waitQueue: Array<{
     hostname: string;
@@ -38,6 +39,17 @@ export class ConcurrencyController {
 
   constructor(config?: Partial<ConcurrencyConfig>) {
     this.config = { ...DEFAULT_CONCURRENCY, ...config };
+  }
+
+  /**
+   * Record a rate-limit event (e.g. 429 Too Many Requests) for a host.
+   * Pauses subsequent requests to this host for the cooldown duration.
+   */
+  recordRateLimit(hostname: string, cooldownMs = 2500): void {
+    this.hostCooldown.set(hostname, Date.now() + cooldownMs);
+    setTimeout(() => {
+      this.processWaitQueue();
+    }, cooldownMs + 50);
   }
 
   /**
@@ -104,6 +116,9 @@ export class ConcurrencyController {
 
   /** Check if a slot can be acquired right now */
   private canAcquire(hostname: string, type: 'http' | 'browser'): boolean {
+    const cooldown = this.hostCooldown.get(hostname);
+    if (cooldown && Date.now() < cooldown) return false;
+
     if (this.globalActive >= this.config.globalMax) return false;
     if (type === 'browser' && this.browserActive >= this.config.browserMax) return false;
 
