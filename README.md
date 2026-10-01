@@ -1,8 +1,8 @@
-# WebHarvest 🌐
-
 <div align="center">
 
-![WebHarvest Banner](public/fav.png)
+<img src="public/fav.png" alt="WebHarvest Logo" width="130" height="auto" style="border-radius: 18px; margin-bottom: 8px;" />
+
+# WebHarvest 🌐
 
 ### **Intelligent Website Cloner & Interactive Offline Mirror Studio**
 
@@ -24,6 +24,7 @@
 - [Overview & Purpose](#-overview--purpose)
 - [Key Features](#-key-features)
 - [System Architecture](#-system-architecture)
+- [The Scrape Lifecycle (What Happens During a Scrape)](#-the-scrape-lifecycle-what-happens-during-a-scrape)
 - [Directory Structure](#-directory-structure)
 - [How It Works](#-how-it-works)
 - [Getting Started](#-getting-started)
@@ -88,46 +89,104 @@ Traditional mirror utilities (like `wget` or `httrack`) often fail on modern web
 
 ## 🏗️ System Architecture
 
-```
-                                  [ User Browser ]
-                                         │
-                   ┌─────────────────────┴─────────────────────┐
-                   ▼                                           ▼
-      [ / ] Landing Capture Input                 [ /mirror/[id] ] Studio
-                   │                                           │
-                   ▼ (POST /api/mirror)                        ▼
-        ┌─────────────────────────────────────────────────────────────┐
-        │                 WebHarvest Backend Engine                   │
-        │                                                             │
-        │  ┌──────────────────┐    Events     ┌────────────────────┐  │
-        │  │ Crawler Engine   │──────────────>│ SSE Progress Stream│  │
-        │  │ (HTTP / Hybrid)  │               │ /api/.../progress  │  │
-        │  └────────┬─────────┘               └────────────────────┘  │
-        │           │ Writes                                          │
-        │           ▼                                                 │
-        │  ┌──────────────────┐               ┌────────────────────┐  │
-        │  │ SQLite Database  │<─────────────>│ Next.js App Router │  │
-        │  │ (Jobs, Metrics)  │               │ (Middleware Proxy) │  │
-        │  └──────────────────┘               └─────────┬──────────┘  │
-        │           │ Files                             │             │
-        │           ▼                                   ▼             │
-        │  ┌──────────────────┐               ┌────────────────────┐  │
-        │  │ Local Filesystem │               │ Sandboxed Preview  │  │
-        │  │ (tmp/downloads/) │               │ /api/.../preview/  │  │
-        │  └────────┬─────────┘               └────────────────────┘  │
-        │           │                                                 │
-        │           ▼ Bundle & ZIP                                    │
-        │  ┌───────────────────────────────────────────────────────┐  │
-        │  │  Standalone Exporter (server.js, serve.py, README.md) │  │
-        │  └───────────────────────────────────────────────────────┘  │
-        └─────────────────────────────────────────────────────────────┘
+WebHarvest is engineered with a modular architecture separating presentation, streaming telemetry, crawler engines, and dual persistence layers:
+
+```mermaid
+flowchart TB
+    subgraph ClientLayer["🖥️ Presentation Layer (Studio & Landing)"]
+        UI["Landing Dashboard (/)\n• URL Capture Input & Presets\n• Scope & Auth Config"]
+        Studio["Mirror Studio (/mirror/[id])\n• 4 Viewport Chassis (Desktop/Tablet/Mobile)\n• In-Place Tabs (Dash, Pages, Assets, Files)\n• Real-Time Draggable Terminal"]
+    end
+
+    subgraph APILayer["⚡ Next.js App Router (Streaming & Reverse Proxy)"]
+        Dispatch["POST /api/mirror\n• URL Normalizer & DNS Guard\n• Job Dispatcher"]
+        SSE["GET /api/mirror/[id]/progress\n• Server-Sent Events (SSE)\n• Live Terminal & Stats Stream"]
+        Sandbox["GET /api/mirror/[id]/preview\n• Dynamic MIME Overrides\n• SPA Fallback Rewriter"]
+        Middleware["Reverse Asset Middleware\n• Intercepts /_next, /assets\n• Auto-reroutes to Sandbox"]
+        Exporter["GET /api/download/[id]\n• Streamed ZIP Packaging\n• Standalone Runner Generator"]
+    end
+
+    subgraph EngineLayer["🕷️ Crawling, Extraction & AST Rewriting Engine"]
+        DNS["Security & DNS Guard\n• SSRF & Loopback Filter\n• Redirect Chain Resolver"]
+        Crawler["Hybrid Crawler Engine\n• Fast HTTP Client\n• Headless Browser (DOM)"]
+        Parser["Parser & Link Rewriter\n• AST HTML/CSS/JS Traverser\n• Root-to-Relative URL Rewriter"]
+        Auth["Auth Interceptor\n• Session Pre-hydration\n• Token & Cookie Injection"]
+    end
+
+    subgraph StorageLayer["💾 Dual Persistence Storage"]
+        SQLite[("SQLite Database (data/webharvest.db)\n• WAL Journaling Mode\n• Jobs, Progress, & Error Logs\n• Auth Profiles & Health Audits")]
+        FileSystem[("Local Storage (downloads/[id]/)\n• Mirrored HTML / CSS / JS Chunks\n• Vector & Raster Images\n• Web Fonts & Manifests")]
+    end
+
+    subgraph OfflineBundle["📦 Standalone Offline Bundle"]
+        Bundle["Generated .ZIP Archive\n• server.js (Node.js Standard Lib)\n• serve.py (Python 3 Multi-threaded)\n• start.sh & start.bat\n• Archive-Tailored README.md"]
+    end
+
+    UI -->|1. Submit Target URL| Dispatch
+    Dispatch --> DNS
+    DNS --> Crawler
+    Crawler <--> Auth
+    Crawler --> Parser
+    Parser -->|Save Static Assets| FileSystem
+    Parser -->|Record Metadata| SQLite
+    Crawler -.->|Stream Events| SSE
+    SSE -.-> Studio
+    Studio --> Sandbox
+    Middleware --> Sandbox
+    Sandbox --> FileSystem
+    Studio --> Exporter
+    Exporter --> FileSystem
+    Exporter --> Bundle
 ```
 
 ### Architectural Highlights
 
-1. **State Persistence**: Uses **SQLite via better-sqlite3** with Write-Ahead Logging (`WAL` mode) for reliable job management that survives server restarts.
-2. **Reverse Asset Middleware**: The custom `middleware.ts` intercepts root-relative asset requests (e.g. `/assets/...`, `/fonts/...`) emitted by mirrored SPAs and dynamically rewrites them to the appropriate sandboxed preview endpoint (`/api/mirror/[id]/preview/...`).
-3. **On-Demand Streaming**: Downloads are streamed directly using native WebStreams for ultra-fast, memory-efficient ZIP delivery.
+1. **State Persistence**: Uses **SQLite via better-sqlite3** with Write-Ahead Logging (`WAL` mode) for reliable job management, error logging, and authentication profiles that survive server restarts.
+2. **Reverse Asset Middleware**: The custom `middleware.ts` intercepts root-relative asset requests (e.g. `/_next/...`, `/assets/...`, `/fonts/...`) emitted by mirrored SPAs and dynamically rewrites them to the appropriate sandboxed preview endpoint (`/api/mirror/[id]/preview/...`).
+3. **Dual Storage Model**: High-performance metadata and job states live in **SQLite**, while raw binary and text assets (`.html`, `.js`, `.css`, `.woff2`, `.png`) live directly on the **Local Filesystem** to enable high-throughput streaming and instant zero-dependency ZIP packaging.
+
+---
+
+## 🔄 The Scrape Lifecycle (What Happens During a Scrape)
+
+When you enter a website URL into WebHarvest and click **Capture**, the engine executes a 6-phase pipeline:
+
+```
+  [1. Validate & Guard] ──> [2. Crawl & Discover] ──> [3. Classify & Download]
+                                                              │
+  [6. Standalone Export] <── [5. Live Stream & Index] <───────┘
+```
+
+### Phase 1: URL Normalization & DNS Security Guard
+- **Validation**: Sanitizes the target URL and enforces protocol (`http`/`https`).
+- **SSRF Prevention**: The DNS Guard resolves target hostnames and blocks private/loopback IPs (`127.0.0.1`, `10.0.0.0/8`, `192.168.0.0/16`, `::1`).
+- **Redirect Resolution**: Follows upstream HTTP 301/302 redirects to find the canonical base address.
+
+### Phase 2: Hybrid Engine Dispatch & Traversal
+- **Engine Selection**: Automatically decides between **Fast HTTP** (for static/SSR sites) and **Headless Browser DOM** (for client-rendered SPAs like Vuexy or ChatGPT).
+- **Authentication Handshake**: If the site requires login, detected demo credentials or injected tokens are pre-hydrated into the session.
+
+### Phase 3: Deep Resource Discovery & Classification
+- **HTML & DOM**: Scans for internal `<a>`, `<iframe>`, and `<form>` links within scope.
+- **Stylesheets & Webfonts**: Parses CSS files for `@import`, `url(...)` declarations, SVGs, and `.woff2` fonts.
+- **Dynamic JavaScript**: Discovers webpack/Vite chunk manifests, dynamic imports, and JSON API payloads.
+- **Media & Images**: Extracts `<img>`, `<picture>`, `srcset`, and CSS background images.
+
+### Phase 4: AST Link Normalization & Offline Hardening
+- **Path Rewriting**: Replaces absolute hostnames (`https://target.com/assets/app.js`) and root-relative paths (`/assets/app.js`) with relative, portable paths (`./assets/app.js`).
+- **SPA Fallback Ready**: Ensures that subroutes reference local parent directories properly so client-side routers don't throw 404s offline.
+
+### Phase 5: Live SSE Telemetry & SQLite Indexing
+- **Real-Time Telemetry**: Streams every discovered file, download event, and console log to the UI via Server-Sent Events (`/api/mirror/[id]/progress`).
+- **SQLite Metadata Recording**: Updates job statuses, bytes downloaded, asset counts, and health audit metrics in `data/webharvest.db`.
+- **Instant Preview**: Assets are served directly to the sandboxed multi-chassis preview iframe in real time.
+
+### Phase 6: Zero-Dependency Standalone Export
+- **Packaging**: Click **Download ZIP** to compile all mirrored files, along with:
+  - `server.js` (native Node.js HTTP server without `node_modules`).
+  - `serve.py` (native Python 3 multi-threaded SPA server).
+  - `start.sh` & `start.bat` (one-click launch executables).
+  - A customized `README.md` detailing the exact mirror stats and pages table.
 
 ---
 
@@ -183,6 +242,7 @@ webharvest/
 │   ├── db/                        # SQLite schema, connection client, & CRUD operations
 │   ├── crawler/                   # URL normalization & link extraction algorithms
 │   ├── export/                    # ZIP archive stream generation
+│   ├── jobs/                      # Background job management and priority queue
 │   ├── jobStore.ts                # In-memory active jobs state cache
 │   └── resolveDir.ts              # Cross-platform download directory path resolution
 ├── data/                          # SQLite persistent database storage (.gitkeep)
@@ -326,4 +386,3 @@ Contributions are welcome! Whether it's reporting a bug, proposing an improvemen
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
-
