@@ -40,17 +40,44 @@ export function rewriteHtmlUrls(html: string, options: RewriteOptions): string {
       return null;
     }
 
-    // Try finding exact match or clean match in map
+    // 1. Exact match in map
     let localPath = options.urlToLocalMap.get(rawUrl);
+
+    // 2. Clean URL without query/hash
     if (!localPath) {
-      // Try stripping fragments/queries
+      const clean = rawUrl.split('?')[0].split('#')[0];
+      localPath = options.urlToLocalMap.get(clean);
+    }
+
+    // 3. Root-relative pathname match (e.g. /_next/static/chunks/foo.css)
+    if (!localPath && rawUrl.startsWith('/')) {
+      const cleanPath = rawUrl.split('?')[0].split('#')[0];
+      localPath = options.urlToLocalMap.get(cleanPath);
+    }
+
+    // 4. Filename fallback (e.g. 017r-ibrf-le-.css)
+    if (!localPath) {
       try {
-        const parsed = new URL(rawUrl, 'http://localhost');
-        const stripped = parsed.origin + parsed.pathname;
-        localPath = options.urlToLocalMap.get(stripped);
-      } catch {
-        // Fallback
-      }
+        const clean = rawUrl.split('?')[0].split('#')[0];
+        const baseName = path.posix.basename(clean);
+        if (baseName && baseName.length > 3) {
+          localPath = options.urlToLocalMap.get(baseName);
+        }
+      } catch {}
+    }
+
+    // 5. Next.js image optimizer fallback (extract inner url parameter)
+    if (!localPath && (rawUrl.includes('/_next/image') || rawUrl.includes('/image?'))) {
+      try {
+        const dummyUrl = new URL(rawUrl, 'http://dummy');
+        const innerUrl = dummyUrl.searchParams.get('url') || dummyUrl.searchParams.get('src');
+        if (innerUrl) {
+          localPath =
+            options.urlToLocalMap.get(innerUrl) ||
+            options.urlToLocalMap.get(decodeURIComponent(innerUrl)) ||
+            options.urlToLocalMap.get(path.posix.basename(innerUrl));
+        }
+      } catch {}
     }
 
     if (!localPath) return null;
@@ -161,12 +188,20 @@ export function rewriteCssUrls(
 
     let localPath = options.urlToLocalMap.get(cleanUrl);
     if (!localPath) {
+      const clean = cleanUrl.split('?')[0].split('#')[0];
+      localPath = options.urlToLocalMap.get(clean);
+    }
+    if (!localPath && cleanUrl.startsWith('/')) {
+      const clean = cleanUrl.split('?')[0].split('#')[0];
+      localPath = options.urlToLocalMap.get(clean);
+    }
+    if (!localPath) {
       try {
-        const parsed = new URL(cleanUrl, 'http://localhost');
-        localPath = options.urlToLocalMap.get(parsed.origin + parsed.pathname);
-      } catch {
-        // Fallback
-      }
+        const baseName = path.posix.basename(cleanUrl.split('?')[0].split('#')[0]);
+        if (baseName && baseName.length > 3) {
+          localPath = options.urlToLocalMap.get(baseName);
+        }
+      } catch {}
     }
 
     if (!localPath) return match;

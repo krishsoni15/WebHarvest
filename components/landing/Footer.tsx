@@ -13,7 +13,7 @@ function GithubIcon({ className }: { className?: string }) {
 
 export function Footer() {
   return (
-    <footer className="w-full border-t border-border mt-auto py-6 bg-background">
+    <footer className="w-full border-t border-border/80 mt-auto py-6 bg-background/80 backdrop-blur-md">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground">
         <div className="flex items-center gap-2">
           <Globe className="w-3.5 h-3.5 text-foreground" />
@@ -27,13 +27,13 @@ export function Footer() {
             href="https://github.com/krishsoni15/WebHarvest"
             target="_blank"
             rel="noreferrer"
-            className="hover:text-foreground transition-colors flex items-center gap-1"
+            className="hover:text-foreground transition-colors flex items-center gap-1 font-medium"
           >
-            <GithubIcon className="w-3.5 h-3.5" />
+            <GithubIcon className="w-3.5 h-3.5 text-foreground" />
             GitHub
           </a>
           <span className="text-muted-foreground/40">•</span>
-          <span className="font-mono text-[11px]">MIT</span>
+          <span className="font-mono text-[11px] text-muted-foreground">MIT Open Source</span>
         </div>
       </div>
     </footer>

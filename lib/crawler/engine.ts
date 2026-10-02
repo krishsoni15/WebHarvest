@@ -40,7 +40,7 @@ export interface CrawlEngineOptions {
 }
 
 export interface CrawlEngineProgress {
-  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'paused';
   pagesDiscovered: number;
   pagesDownloaded: number;
   assetsDiscovered: number;
@@ -78,6 +78,8 @@ export class CrawlEngine {
   private processor: AssetProcessor;
 
   private isCancelled = false;
+  private isPaused = false;
+  private pausePromiseResolve: (() => void) | null = null;
   private startTime = 0;
   private activeWorkers = 0;
   private urlToLocalMap = new Map<string, string>();
@@ -85,6 +87,7 @@ export class CrawlEngine {
   private processedStylesheets: ProcessedResource[] = [];
   private allApiRequests: ApiRequestRecord[] = [];
   private screenshots: { desktop?: string; mobile?: string } = {};
+  private hasLoggedStage2 = false;
 
   constructor(private options: CrawlEngineOptions) {
     const limitsConfig: CrawlLimits = {
@@ -120,7 +123,7 @@ export class CrawlEngine {
       this.concurrency
     );
 
-    this.processor = new AssetProcessor(options.outputDir);
+    this.processor = new AssetProcessor(options.outputDir, options.seedUrl);
   }
 
   /**
@@ -128,7 +131,35 @@ export class CrawlEngine {
    */
   cancel(): void {
     this.isCancelled = true;
+    if (this.pausePromiseResolve) {
+      this.pausePromiseResolve();
+      this.pausePromiseResolve = null;
+    }
     this.options.onLog?.('Crawl cancellation requested', 'warn');
+  }
+
+  /**
+   * Pause the crawl loop.
+   */
+  pause(): void {
+    if (this.isPaused) return;
+    this.isPaused = true;
+    this.emitProgress();
+    this.options.onLog?.('Crawl paused by user', 'info');
+  }
+
+  /**
+   * Resume the crawl loop.
+   */
+  resume(): void {
+    if (!this.isPaused) return;
+    this.isPaused = false;
+    if (this.pausePromiseResolve) {
+      this.pausePromiseResolve();
+      this.pausePromiseResolve = null;
+    }
+    this.emitProgress();
+    this.options.onLog?.('Crawl resumed by user', 'info');
   }
 
   /**
@@ -137,7 +168,7 @@ export class CrawlEngine {
   async run(): Promise<CrawlEngineResult> {
     this.startTime = Date.now();
     this.options.onLog?.(
-      `Initiating V3 capture for: ${this.options.seedUrl} [Engine: ${this.options.mode || 'auto'}, Scope: ${this.scope.getConfig().mode}]`
+      `[STAGE 1/4] Discovery & Page Crawling: Initiating V3 capture for: ${this.options.seedUrl} [Engine: ${this.options.mode || 'auto'}, Scope: ${this.scope.getConfig().mode}]`
     );
 
     // 1. Seed initial root URL
@@ -154,6 +185,14 @@ export class CrawlEngine {
 
     try {
       while (!this.queue.isEmpty() && !this.isCancelled && !this.limits.shouldStop()) {
+        // Handle crawl pause
+        if (this.isPaused && !this.isCancelled) {
+          await new Promise<void>((resolve) => {
+            this.pausePromiseResolve = resolve;
+          });
+        }
+        if (this.isCancelled) break;
+
         const item = this.queue.dequeue();
         if (!item) break;
 
@@ -166,7 +205,7 @@ export class CrawlEngine {
       }
 
       // 2. Post-crawl rewrite phase
-      this.options.onLog?.('Rewriting document links and stylesheets for offline mirror...');
+      this.options.onLog?.('[STAGE 3/4] Offline Link & Asset Rewriting: Rewriting document links and stylesheets for offline mirror...');
       await this.rewriteAllFiles();
 
       // 3. API Discovery Cataloging
@@ -210,7 +249,7 @@ export class CrawlEngine {
       }
 
       const finalStatus = this.isCancelled ? 'cancelled' : 'completed';
-      this.options.onLog?.(`Crawl ${finalStatus}. Processed ${this.urlToLocalMap.size} unique resources.`);
+      this.options.onLog?.(`[STAGE 4/4] Assembly Complete: Crawl ${finalStatus}. Processed ${this.urlToLocalMap.size} unique resources.`);
 
       return {
         status: finalStatus,
@@ -246,6 +285,19 @@ export class CrawlEngine {
       let processed: ProcessedResource | null = null;
       const isPage = item.type === 'page';
 
+      if (isPage) {
+        this.options.onLog?.(
+          `[STAGE 1/4] Crawling page [${counters.pagesDownloaded + 1}]: ${item.url}${item.depth > 0 ? ` (Depth ${item.depth})` : ''}`,
+          'info'
+        );
+      } else if (!this.hasLoggedStage2) {
+        this.hasLoggedStage2 = true;
+        this.options.onLog?.(
+          '[STAGE 2/4] Asset Preservation & Resource Mirroring: Downloading stylesheets, scripts, fonts, and media...',
+          'info'
+        );
+      }
+
       // Decide whether to use Playwright browser engine
       const forceBrowser = mode === 'browser' || !!this.options.storageState;
       const shouldUseBrowser =
@@ -257,7 +309,9 @@ export class CrawlEngine {
             const httpRes = await this.httpCrawler.fetchResource(
               item.url,
               counters.bytesDownloaded,
-              item.discoveredFrom
+              item.discoveredFrom,
+              undefined,
+              false
             );
 
             const htmlContent = httpRes.buffer.toString('utf-8');
@@ -342,7 +396,9 @@ export class CrawlEngine {
           const httpRes = await this.httpCrawler.fetchResource(
             item.url,
             counters.bytesDownloaded,
-            item.discoveredFrom
+            item.discoveredFrom,
+            undefined,
+            true
           );
 
           processed = await this.processor.process(
@@ -365,27 +421,96 @@ export class CrawlEngine {
       if (!processed) return;
 
       // Content-addressed deduplication: reuse physical file if SHA-256 match exists
-      const existingPath = this.visited.hasContent(processed.sha256);
-      if (existingPath && processed.type !== 'page') {
+      // ONLY deduplicate non-zero byte assets of compatible extensions/types
+      const isZeroByte = processed.size === 0;
+      const existingPath = !isZeroByte ? this.visited.hasContent(processed.sha256) : null;
+      const extMatch = existingPath
+        ? path.extname(existingPath).toLowerCase() === path.extname(processed.localPath).toLowerCase()
+        : false;
+
+      if (existingPath && processed.type !== 'page' && extMatch) {
         this.urlToLocalMap.set(item.url, existingPath);
         this.urlToLocalMap.set(processed.url, existingPath);
         this.limits.recordAsset(processed.size);
         return;
-      } else {
+      } else if (!isZeroByte) {
         this.visited.addContent(processed.sha256, processed.localPath);
       }
 
       this.urlToLocalMap.set(item.url, processed.localPath);
       this.urlToLocalMap.set(processed.url, processed.localPath);
+      try {
+        const parsed = new URL(processed.url);
+        const isGenericEndpoint =
+          parsed.pathname === '/_next/image' ||
+          parsed.pathname === '/image' ||
+          parsed.pathname.endsWith('/opengraph-image') ||
+          parsed.pathname.endsWith('/twitter-image');
+
+        if (!isGenericEndpoint) {
+          this.urlToLocalMap.set(parsed.pathname, processed.localPath);
+          const baseName = path.posix.basename(parsed.pathname);
+          if (baseName && baseName.length > 3 && !this.urlToLocalMap.has(baseName)) {
+            this.urlToLocalMap.set(baseName, processed.localPath);
+          }
+        }
+
+        // Map root-relative pathname + query (e.g. /_next/image?url=...&w=...)
+        if (parsed.search) {
+          this.urlToLocalMap.set(parsed.pathname + parsed.search, processed.localPath);
+        }
+
+        // Also map decoded inner image URL if present
+        if (parsed.searchParams.has('url') || parsed.searchParams.has('src')) {
+          const innerUrl = parsed.searchParams.get('url') || parsed.searchParams.get('src') || '';
+          if (innerUrl) {
+            this.urlToLocalMap.set(innerUrl, processed.localPath);
+            try {
+              const decodedInner = decodeURIComponent(innerUrl);
+              this.urlToLocalMap.set(decodedInner, processed.localPath);
+              const innerParsed = new URL(decodedInner, processed.url);
+              this.urlToLocalMap.set(innerParsed.pathname, processed.localPath);
+              const innerBase = path.posix.basename(innerParsed.pathname);
+              if (innerBase && innerBase.length > 3 && !this.urlToLocalMap.has(innerBase)) {
+                this.urlToLocalMap.set(innerBase, processed.localPath);
+              }
+            } catch {}
+          }
+        }
+      } catch {}
 
       // Track limits & counters
-      if (processed.type === 'page') {
+      const isErrorPage =
+        processed.status >= 400 ||
+        (processed.type === 'page' &&
+          processed.rawBuffer &&
+          (processed.rawBuffer.toString('utf-8').includes('404 | This page could not be found') ||
+            processed.rawBuffer.toString('utf-8').includes('This page could not be found.')));
+
+      if (processed.type === 'page' && !isErrorPage) {
         this.limits.recordPage(processed.size);
         this.processedPages.push(processed);
+        this.options.onLog?.(
+          `Preserved page: ${item.url} (${(processed.size / 1024).toFixed(1)} KB) — Found ${processed.discoveredLinks?.length || 0} links, ${processed.discoveredResources?.length || 0} assets`,
+          'info'
+        );
+      } else if (processed.type === 'page' && isErrorPage) {
+        this.limits.recordError();
+        this.options.onLog?.(`Page returned 404/Error: ${item.url}. Quarantining without following links.`, 'warn');
       } else {
         this.limits.recordAsset(processed.size);
         if (processed.type === 'stylesheet') {
           this.processedStylesheets.push(processed);
+        }
+        if (processed.type === 'stylesheet' || processed.type === 'script' || (counters.assetsDownloaded % 15 === 0)) {
+          let assetName = item.url;
+          try {
+            assetName = path.posix.basename(new URL(item.url).pathname) || item.url;
+          } catch {}
+          this.options.onLog?.(
+            `[STAGE 2/4] Preserved [${processed.type}] ${assetName} (${(processed.size / 1024).toFixed(1)} KB) — Total: ${counters.assetsDownloaded + 1} assets (${((counters.bytesDownloaded + processed.size) / (1024 * 1024)).toFixed(2)} MB)`,
+            'info'
+          );
         }
       }
 
@@ -487,6 +612,14 @@ export class CrawlEngine {
             item.url
           );
           this.urlToLocalMap.set(asset.url, processedAsset.localPath);
+          try {
+            const parsed = new URL(asset.url);
+            this.urlToLocalMap.set(parsed.pathname, processedAsset.localPath);
+            const baseName = path.posix.basename(parsed.pathname);
+            if (baseName && baseName.length > 3 && !this.urlToLocalMap.has(baseName)) {
+              this.urlToLocalMap.set(baseName, processedAsset.localPath);
+            }
+          } catch {}
           this.limits.recordAsset(processedAsset.size);
           this.visited.addURL(assetKey);
         } catch {
@@ -587,7 +720,7 @@ export class CrawlEngine {
     if (!this.options.onProgress) return;
     const counters = this.limits.getCounters();
     this.options.onProgress({
-      status: this.isCancelled ? 'cancelled' : 'running',
+      status: this.isCancelled ? 'cancelled' : this.isPaused ? 'paused' : 'running',
       pagesDiscovered: counters.pagesFound,
       pagesDownloaded: counters.pagesDownloaded,
       assetsDiscovered: counters.assetsFound,

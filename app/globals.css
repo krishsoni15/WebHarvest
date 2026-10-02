@@ -1,27 +1,55 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @layer base {
   :root {
+    --background: #ffffff;
+    --foreground: #09090b;
+    --card: #ffffff;
+    --card-foreground: #09090b;
+    --popover: #ffffff;
+    --popover-foreground: #09090b;
+    --primary: #09090b;
+    --primary-foreground: #ffffff;
+    --secondary: #f4f4f5;
+    --secondary-foreground: #18181b;
+    --muted: #f4f4f5;
+    --muted-foreground: #71717a;
+    --accent: #f4f4f5;
+    --accent-foreground: #18181b;
+    --destructive: #ef4444;
+    --destructive-foreground: #ffffff;
+    --border: #e4e4e7;
+    --input: #e4e4e7;
+    --ring: #09090b;
+    --radius: 10px;
+    --success: #09090b;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+  }
+
+  .dark {
     --background: #000000;
-    --foreground: #fafafa;
-    --card: #0c0c0e;
-    --card-foreground: #fafafa;
-    --popover: #0c0c0e;
-    --popover-foreground: #fafafa;
+    --foreground: #ffffff;
+    --card: #09090b;
+    --card-foreground: #ffffff;
+    --popover: #09090b;
+    --popover-foreground: #ffffff;
     --primary: #ffffff;
     --primary-foreground: #000000;
     --secondary: #18181b;
-    --secondary-foreground: #fafafa;
+    --secondary-foreground: #ffffff;
     --muted: #18181b;
     --muted-foreground: #a1a1aa;
     --accent: #27272a;
-    --accent-foreground: #fafafa;
+    --accent-foreground: #ffffff;
     --destructive: #ef4444;
     --destructive-foreground: #ffffff;
     --border: #27272a;
     --input: #27272a;
-    --ring: #d4d4d8;
-    --radius: 8px;
+    --ring: #ffffff;
+    --radius: 10px;
     --success: #ffffff;
     --warning: #f59e0b;
     --danger: #ef4444;
@@ -30,7 +58,7 @@
   .light {
     --background: #ffffff;
     --foreground: #09090b;
-    --card: #fafafa;
+    --card: #ffffff;
     --card-foreground: #09090b;
     --popover: #ffffff;
     --popover-foreground: #09090b;
@@ -46,8 +74,8 @@
     --destructive-foreground: #ffffff;
     --border: #e4e4e7;
     --input: #e4e4e7;
-    --ring: #18181b;
-    --radius: 8px;
+    --ring: #09090b;
+    --radius: 10px;
     --success: #09090b;
     --warning: #f59e0b;
     --danger: #ef4444;
@@ -76,9 +104,60 @@
   --color-ring: var(--ring);
   --color-success: var(--success);
   --color-warning: var(--warning);
-  --color-danger: var(--danger);
+  --font-display: var(--font-display), var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-sans: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-mono: var(--font-code), var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.025em;
+}
+
+.font-code {
+  font-family: var(--font-mono);
+}
+
+/* Card hover micro-interactions */
+.card-hover-effect {
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.25s ease,
+    box-shadow 0.3s ease,
+    background-color 0.25s ease;
+}
+
+.card-hover-effect:hover {
+  transform: translateY(-3px);
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 12px 32px -10px rgba(0, 0, 0, 0.6), 0 0 24px -5px rgba(255, 255, 255, 0.06);
+}
+
+.light .card-hover-effect:hover {
+  border-color: rgba(0, 0, 0, 0.28);
+  box-shadow: 0 12px 32px -10px rgba(0, 0, 0, 0.1), 0 0 24px -5px rgba(0, 0, 0, 0.04);
+}
+
+/* Native CSS Scroll-driven animations with fallback support */
+@keyframes scrollRevealFade {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports ((animation-timeline: view()) and (animation-range: entry)) {
+    .scroll-driven-reveal {
+      animation: scrollRevealFade 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+      animation-timeline: view();
+      animation-range: entry 10% cover 30%;
+    }
+  }
 }
 
 body {
@@ -110,18 +189,17 @@ body {
   0% {
     background-position: 200% 0;
   }
+
   100% {
     background-position: -200% 0;
   }
 }
 
 .shiny-text {
-  background-image: linear-gradient(
-    120deg,
-    rgba(9, 9, 11, 0.6) 0%,
-    rgba(9, 9, 11, 1) 50%,
-    rgba(9, 9, 11, 0.6) 100%
-  );
+  background-image: linear-gradient(120deg,
+      rgba(0, 0, 0, 0.45) 0%,
+      rgba(0, 0, 0, 1) 50%,
+      rgba(0, 0, 0, 0.45) 100%);
   background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -130,24 +208,467 @@ body {
 
 :root.dark .shiny-text,
 :root:not(.light) .shiny-text {
-  background-image: linear-gradient(
-    120deg,
-    rgba(255, 255, 255, 0.5) 0%,
-    rgba(255, 255, 255, 1) 50%,
-    rgba(255, 255, 255, 0.5) 100%
-  );
+  background-image: linear-gradient(120deg,
+      rgba(255, 255, 255, 0.45) 0%,
+      rgba(255, 255, 255, 1) 50%,
+      rgba(255, 255, 255, 0.45) 100%);
 }
 
 .bg-blueprint-grid {
   background-size: 40px 40px;
-  background-image: 
+  background-image:
     linear-gradient(to right, rgba(0, 0, 0, 0.035) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(0, 0, 0, 0.035) 1px, transparent 1px);
 }
 
 :root.dark .bg-blueprint-grid,
 :root:not(.light) .bg-blueprint-grid {
-  background-image: 
+  background-image:
     linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}
+
+/* ========================================================
+   ✨ BREATHING ANIMATED GRADIENT & AURORA MESH SYSTEM
+   ======================================================== */
+
+/* 1. Core Breathing Pulse: expands and contracts smoothly like living breath */
+@keyframes breathingPulse {
+  0% {
+    transform: translate(-50%, -50%) scale(0.85);
+    opacity: 0.4;
+  }
+
+  50% {
+    transform: translate(-50%, -50%) scale(1.22);
+    opacity: 0.95;
+  }
+
+  100% {
+    transform: translate(-50%, -50%) scale(0.85);
+    opacity: 0.4;
+  }
+}
+
+/* 2. Aurora Ribbon Drift 1: organic flowing motion across diagonal vectors */
+@keyframes auroraFlow1 {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
+  }
+
+  33% {
+    transform: translate3d(70px, -40px, 0) scale(1.18) rotate(14deg);
+  }
+
+  66% {
+    transform: translate3d(-50px, 35px, 0) scale(0.9) rotate(-10deg);
+  }
+
+  100% {
+    transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
+  }
+}
+
+/* 3. Aurora Ribbon Drift 2: counter-phase organic flowing motion */
+@keyframes auroraFlow2 {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
+  }
+
+  33% {
+    transform: translate3d(-60px, 45px, 0) scale(0.88) rotate(-16deg);
+  }
+
+  66% {
+    transform: translate3d(65px, -35px, 0) scale(1.2) rotate(12deg);
+  }
+
+  100% {
+    transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
+  }
+}
+
+/* 4. Fluid Aurora Orbit: floating central orb */
+@keyframes auroraFlow3 {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.35;
+  }
+
+  50% {
+    transform: translate3d(40px, 60px, 0) scale(1.28);
+    opacity: 0.85;
+  }
+
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.35;
+  }
+}
+
+/* 5. Luminous Horizon Breathing Wave */
+@keyframes horizonBreathing {
+  0% {
+    transform: translate(-50%, 0) scaleX(0.85) scaleY(0.9);
+    opacity: 0.4;
+  }
+
+  50% {
+    transform: translate(-50%, 0) scaleX(1.18) scaleY(1.12);
+    opacity: 0.88;
+  }
+
+  100% {
+    transform: translate(-50%, 0) scaleX(0.85) scaleY(0.9);
+    opacity: 0.4;
+  }
+}
+
+/* 6. Dynamic Color Shift / Animated Mesh Gradient */
+@keyframes gradientShift {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.animate-aurora-1 {
+  animation: auroraFlow1 18s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  will-change: transform;
+}
+
+.animate-aurora-2 {
+  animation: auroraFlow2 22s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  will-change: transform;
+}
+
+.animate-aurora-3 {
+  animation: auroraFlow3 14s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  will-change: transform, opacity;
+}
+
+.animate-breathing-core {
+  animation: breathingPulse 9.5s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.animate-horizon-breath {
+  animation: horizonBreathing 11s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.animate-gradient-shift {
+  background-size: 200% 200%;
+  animation: gradientShift 14s ease infinite;
+}
+
+.animate-breathing-aura {
+  animation: breathingPulse 11s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.animate-breathing-side {
+  animation: auroraFlow1 16s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.animate-breathing-side-delayed {
+  animation: auroraFlow2 19s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+/* ✨ Serin-style Organic Breathing Horizon, Halo & Amphitheater Crescent */
+@keyframes serinBreathingHorizon {
+  0% {
+    transform: scaleX(0.88) scaleY(0.82) translateY(32px);
+    opacity: 0.42;
+  }
+
+  50% {
+    transform: scaleX(1.18) scaleY(1.15) translateY(-16px);
+    opacity: 0.96;
+  }
+
+  100% {
+    transform: scaleX(0.88) scaleY(0.82) translateY(32px);
+    opacity: 0.42;
+  }
+}
+
+@keyframes serinBreathingHalo {
+  0% {
+    transform: scale(0.86);
+    opacity: 0.36;
+  }
+
+  50% {
+    transform: scale(1.22);
+    opacity: 0.88;
+  }
+
+  100% {
+    transform: scale(0.86);
+    opacity: 0.36;
+  }
+}
+
+@keyframes serinBreathingAmphitheater {
+  0% {
+    transform: scaleX(0.92) scaleY(0.88);
+    opacity: 0.32;
+  }
+
+  50% {
+    transform: scaleX(1.12) scaleY(1.08);
+    opacity: 0.78;
+  }
+
+  100% {
+    transform: scaleX(0.92) scaleY(0.88);
+    opacity: 0.32;
+  }
+}
+
+@keyframes serinFloatingOrbLeft {
+  0% {
+    transform: translate3d(0, 0, 0) scale(0.92);
+    opacity: 0.35;
+  }
+
+  50% {
+    transform: translate3d(-35px, -25px, 0) scale(1.24);
+    opacity: 0.72;
+  }
+
+  100% {
+    transform: translate3d(0, 0, 0) scale(0.92);
+    opacity: 0.35;
+  }
+}
+
+@keyframes serinFloatingOrbRight {
+  0% {
+    transform: translate3d(0, 0, 0) scale(0.90);
+    opacity: 0.35;
+  }
+
+  50% {
+    transform: translate3d(35px, -20px, 0) scale(1.22);
+    opacity: 0.68;
+  }
+
+  100% {
+    transform: translate3d(0, 0, 0) scale(0.90);
+    opacity: 0.35;
+  }
+}
+
+.animate-serin-horizon {
+  animation: serinBreathingHorizon 8.5s cubic-bezier(0.42, 0, 0.58, 1) infinite;
+  will-change: transform, opacity;
+}
+
+.animate-serin-halo {
+  animation: serinBreathingHalo 7.5s cubic-bezier(0.42, 0, 0.58, 1) infinite;
+  will-change: transform, opacity;
+}
+
+.animate-serin-amphitheater {
+  animation: serinBreathingAmphitheater 9.5s cubic-bezier(0.42, 0, 0.58, 1) infinite;
+  will-change: transform, opacity;
+}
+
+.animate-serin-orb-left {
+  animation: serinFloatingOrbLeft 11s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  will-change: transform, opacity;
+}
+
+.animate-serin-orb-right {
+  animation: serinFloatingOrbRight 13s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  will-change: transform, opacity;
+}
+
+/* ✨ Serin Breathing Gradients: Default is Dark (Luminous Monochrome White/Silver), .light is Charcoal Mist */
+.serin-horizon-gradient {
+  background: radial-gradient(ellipse 110% 65% at 50% 100%, rgba(255, 255, 255, 0.82) 0%, rgba(240, 245, 255, 0.48) 28%, rgba(255, 255, 255, 0.18) 58%, transparent 84%);
+}
+
+.light .serin-horizon-gradient {
+  background: radial-gradient(ellipse 110% 65% at 50% 100%, rgba(15, 23, 42, 0.18) 0%, rgba(30, 41, 59, 0.10) 30%, rgba(51, 65, 85, 0.04) 60%, transparent 82%);
+}
+
+.serin-amphitheater-gradient {
+  background: radial-gradient(ellipse 120% 95% at 50% -15%, transparent 42%, rgba(255, 255, 255, 0.48) 68%, rgba(240, 245, 255, 0.18) 82%, transparent 95%);
+}
+
+.light .serin-amphitheater-gradient {
+  background: radial-gradient(ellipse 120% 95% at 50% -15%, transparent 42%, rgba(15, 23, 42, 0.10) 68%, rgba(30, 41, 59, 0.04) 82%, transparent 95%);
+}
+
+.serin-halo-gradient {
+  background: radial-gradient(circle at center, rgba(255, 255, 255, 0.52) 0%, rgba(235, 240, 255, 0.22) 45%, transparent 75%);
+}
+
+.light .serin-halo-gradient {
+  background: radial-gradient(circle at center, rgba(15, 23, 42, 0.10) 0%, rgba(30, 41, 59, 0.04) 45%, transparent 75%);
+}
+
+.serin-orb-left-gradient {
+  background: radial-gradient(circle at center, rgba(255, 255, 255, 0.38) 0%, rgba(240, 245, 255, 0.12) 50%, transparent 75%);
+}
+
+.light .serin-orb-left-gradient {
+  background: radial-gradient(circle at center, rgba(15, 23, 42, 0.08) 0%, transparent 70%);
+}
+
+.serin-orb-right-gradient {
+  background: radial-gradient(circle at center, rgba(255, 255, 255, 0.38) 0%, rgba(240, 245, 255, 0.12) 50%, transparent 75%);
+}
+
+.light .serin-orb-right-gradient {
+  background: radial-gradient(circle at center, rgba(15, 23, 42, 0.08) 0%, transparent 70%);
+}
+
+/* 💫 Serin Full Half-Circle Breathing Arc */
+@keyframes serinArcBreathe {
+  0% {
+    transform: scaleX(0.97) scaleY(0.96) translateY(10px);
+    opacity: 0.75;
+  }
+
+  50% {
+    transform: scaleX(1.03) scaleY(1.03) translateY(-6px);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scaleX(0.97) scaleY(0.96) translateY(10px);
+    opacity: 0.75;
+  }
+}
+
+.animate-serin-arc {
+  animation: serinArcBreathe 8s cubic-bezier(0.42, 0, 0.58, 1) infinite;
+  will-change: transform, opacity;
+}
+
+/* 💫 Serin Floating Down Chevron Animation */
+@keyframes serinChevronFloat {
+
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.55;
+  }
+
+  50% {
+    transform: translateY(6px);
+    opacity: 0.95;
+  }
+}
+
+.animate-serin-chevron {
+  animation: serinChevronFloat 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Dark Mode: Serin-style Rich Indigo/Violet Horizon Arc (Multi-layered, Not Monochromatic White) */
+.serin-arc-core {
+  background: radial-gradient(ellipse 135% 120% at 50% -20%,
+      transparent 0%,
+      transparent 74%,
+      rgba(129, 140, 248, 0.35) 77%,
+      rgba(224, 231, 255, 0.85) 79.5%,
+      #ffffff 80%,
+      rgba(199, 210, 254, 0.85) 80.5%,
+      rgba(99, 102, 241, 0.4) 83%,
+      transparent 86%);
+}
+
+.serin-arc-glow {
+  background: radial-gradient(ellipse 135% 120% at 50% -20%,
+      transparent 0%,
+      transparent 66%,
+      rgba(79, 70, 229, 0.25) 72%,
+      rgba(124, 58, 237, 0.70) 77%,
+      rgba(99, 102, 241, 0.85) 80%,
+      rgba(59, 130, 246, 0.55) 83%,
+      rgba(67, 56, 202, 0.20) 88%,
+      transparent 92%);
+}
+
+.serin-arc-ambient {
+  background: radial-gradient(ellipse 140% 125% at 50% -20%,
+      transparent 0%,
+      transparent 55%,
+      rgba(124, 58, 237, 0.18) 68%,
+      rgba(79, 70, 229, 0.45) 78%,
+      rgba(37, 99, 235, 0.30) 84%,
+      rgba(30, 27, 75, 0.15) 90%,
+      transparent 96%);
+}
+
+/* Secondary Serin Bottom Horizon Aura: Lifted ~1-2% from bottom edge */
+.serin-bottom-aura {
+  background: radial-gradient(ellipse 95% 58% at 50% 90%,
+      rgba(99, 102, 241, 0.32) 0%,
+      rgba(124, 58, 237, 0.24) 30%,
+      rgba(59, 130, 246, 0.14) 55%,
+      rgba(30, 27, 75, 0.08) 75%,
+      transparent 88%);
+}
+
+/* Light Mode: Vibrant Celestial Azure Horizon with Royal Cobalt Arc */
+html:not(.dark) .serin-arc-core,
+.light .serin-arc-core {
+  background: radial-gradient(ellipse 135% 120% at 50% -20%,
+      transparent 0%,
+      transparent 73%,
+      rgba(99, 102, 241, 0.20) 76%,
+      rgba(59, 130, 246, 0.65) 79.5%,
+      rgba(37, 99, 235, 0.80) 80%,
+      rgba(99, 102, 241, 0.40) 81.5%,
+      transparent 85%);
+}
+
+html:not(.dark) .serin-arc-glow,
+.light .serin-arc-glow {
+  background: radial-gradient(ellipse 135% 120% at 50% -20%,
+      transparent 0%,
+      transparent 64%,
+      rgba(99, 102, 241, 0.12) 70%,
+      rgba(59, 130, 246, 0.35) 76%,
+      rgba(37, 99, 235, 0.45) 79%,
+      rgba(99, 102, 241, 0.18) 84%,
+      transparent 90%);
+}
+
+html:not(.dark) .serin-arc-ambient,
+.light .serin-arc-ambient {
+  background: radial-gradient(ellipse 140% 125% at 50% -20%,
+      transparent 0%,
+      transparent 52%,
+      rgba(59, 130, 246, 0.06) 66%,
+      rgba(99, 102, 241, 0.15) 76%,
+      rgba(59, 130, 246, 0.08) 84%,
+      transparent 94%);
+}
+
+html:not(.dark) .serin-bottom-aura,
+.light .serin-bottom-aura {
+  background: radial-gradient(ellipse 95% 58% at 50% 90%,
+      rgba(59, 130, 246, 0.15) 0%,
+      rgba(99, 102, 241, 0.10) 35%,
+      transparent 75%);
+}
+
+.serin-arc-mask {
+  mask-image: linear-gradient(to bottom, #000 0%, #000 68%, rgba(0, 0, 0, 0.8) 80%, rgba(0, 0, 0, 0.2) 90%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 68%, rgba(0, 0, 0, 0.8) 80%, rgba(0, 0, 0, 0.2) 90%, transparent 100%);
 }

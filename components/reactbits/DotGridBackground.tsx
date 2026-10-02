@@ -84,7 +84,7 @@ export function DotGridBackground({
       const offsetX = (width - cols * gap) / 2;
       const offsetY = (height - rows * gap) / 2;
 
-      const currentBaseColor = isLight ? 'rgba(0, 0, 0, 0.08)' : (baseColor || 'rgba(255, 255, 255, 0.14)');
+      const currentBaseColor = isLight ? 'rgba(0, 0, 0, 0.08)' : (baseColor || 'rgba(255, 255, 255, 0.12)');
       const currentActiveColor = isLight ? 'rgba(0, 0, 0, 0.85)' : (activeColor || 'rgba(255, 255, 255, 0.95)');
 
       for (let i = 0; i <= cols; i++) {

@@ -12,9 +12,53 @@ import { NextRequest, NextResponse } from 'next/server';
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
-  // 1. Skip internal Next.js paths, API routes, and top-level pages
+  // 1. Identify target mirror job ID from:
+  // a) Referer header (when preview iframe requests sub-resources like /_next/static/... or /assets/...)
+  // b) webharvest_preview_id cookie (set during preview visit)
+  const referer = req.headers.get('referer');
+  const iframePreviewMatch = referer ? referer.match(/\/api\/mirror\/([a-zA-Z0-9]+)\/preview/) : null;
+  const targetIdFromIframe = iframePreviewMatch ? iframePreviewMatch[1] : null;
+
+  let targetId: string | null = targetIdFromIframe;
+  if (!targetId && referer) {
+    const mirrorMatch = referer.match(/\/mirror\/([a-zA-Z0-9]+)/);
+    if (mirrorMatch && mirrorMatch[1]) {
+      targetId = mirrorMatch[1];
+    }
+  }
+  if (!targetId) {
+    const cookie = req.cookies.get('webharvest_preview_id');
+    if (cookie && cookie.value) {
+      targetId = cookie.value;
+    }
+  }
+
+  // 2. Intercept relative asset paths that mistakenly lost the [id] prefix:
+  // e.g. /api/mirror/assets/images/logo.png -> /api/mirror/[id]/preview/assets/images/logo.png
+  const apiMirrorMissingId = pathname.match(/^\/api\/mirror\/(assets|images|fonts|css|js|pages|media|wp-content|wp-includes)\/(.+)$/i);
+  if (apiMirrorMissingId && targetId) {
+    const assetSubpath = `${apiMirrorMissingId[1]}/${apiMirrorMissingId[2]}`;
+    const rewriteUrl = new URL(`/api/mirror/${targetId}/preview/${assetSubpath}${search}`, req.url);
+    return NextResponse.rewrite(rewriteUrl);
+  }
+
+  // 3. Intercept Next.js assets (/_next/...)
+  if (pathname.startsWith('/_next')) {
+    // If request originates from inside a mirror preview iframe, this is a stylesheet/chunk
+    // belonging to the mirrored website (e.g. Tailwind CSS, React, Next.js site).
+    // Route it directly to the mirror preview API so it loads seamlessly with 100% styles!
+    if (targetIdFromIframe) {
+      const cleanPath = pathname.startsWith('/') ? pathname.slice(1) : pathname;
+      const rewriteUrl = new URL(`/api/mirror/${targetIdFromIframe}/preview/${cleanPath}${search}`, req.url);
+      return NextResponse.rewrite(rewriteUrl);
+    }
+
+    // Otherwise, this is WebHarvest's own Next.js assets - let Next.js serve them untouched
+    return NextResponse.next();
+  }
+
+  // 4. Skip WebHarvest top-level application routes and valid API routes
   if (
-    pathname.startsWith('/_next') ||
     pathname.startsWith('/api') ||
     pathname.startsWith('/mirror') ||
     pathname === '/' ||
@@ -23,36 +67,10 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // 2. Identify target mirror job ID from:
-  // a) Referer header (when iframe requests sub-resources)
-  // b) webharvest_preview_id cookie (set during preview visit)
-  let targetId: string | null = null;
-
-  const referer = req.headers.get('referer');
-  if (referer) {
-    const match = referer.match(/\/api\/mirror\/([a-zA-Z0-9]+)\/preview/);
-    if (match && match[1]) {
-      targetId = match[1];
-    } else {
-      const mirrorMatch = referer.match(/\/mirror\/([a-zA-Z0-9]+)/);
-      if (mirrorMatch && mirrorMatch[1]) {
-        targetId = mirrorMatch[1];
-      }
-    }
-  }
-
-  if (!targetId) {
-    const cookie = req.cookies.get('webharvest_preview_id');
-    if (cookie && cookie.value) {
-      targetId = cookie.value;
-    }
-  }
-
-  // 3. If a mirror ID is identified, rewrite the request internally to the preview handler
+  // 5. Rewrite root-relative asset requests to the preview handler
   if (targetId) {
     const cleanPath = pathname.startsWith('/') ? pathname.slice(1) : pathname;
     const rewriteUrl = new URL(`/api/mirror/${targetId}/preview/${cleanPath}${search}`, req.url);
-    
     return NextResponse.rewrite(rewriteUrl);
   }
 
@@ -63,10 +81,8 @@ export const config = {
   matcher: [
     /*
      * Match all request paths except for:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      */
-    '/((?!_next/static|_next/image|favicon.ico).*)',
+    '/((?!favicon.ico).*)',
   ],
 };

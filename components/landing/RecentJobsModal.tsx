@@ -122,7 +122,7 @@ export function RecentJobsModal({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                   <Button
                     type="button"
                     variant="ghost"
@@ -131,11 +131,12 @@ export function RecentJobsModal({
                       e.stopPropagation();
                       onDeleteJob(job.id);
                     }}
-                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive h-7 w-7 p-0"
+                    className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-muted-foreground hover:text-destructive h-7 w-7 p-0 shrink-0 cursor-pointer"
+                    title="Delete saved job"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
-                  <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                  <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors shrink-0" />
                 </div>
               </div>
             );

@@ -44,7 +44,11 @@ export function findExistingChromiumBinary(): string | null {
   }
 
   const candidateRoots = [
-    process.env.PLAYWRIGHT_BROWSERS_PATH,
+    process.env.PLAYWRIGHT_BROWSERS_PATH && process.env.PLAYWRIGHT_BROWSERS_PATH !== '0'
+      ? process.env.PLAYWRIGHT_BROWSERS_PATH
+      : null,
+    path.join(process.cwd(), 'node_modules', 'playwright-core', '.local-browsers'),
+    path.join(process.cwd(), 'node_modules', '.local-browsers'),
     path.join(process.cwd(), 'node_modules', '@playwright', 'browsers'),
     path.join(process.cwd(), 'node_modules', '.cache', 'ms-playwright'),
     '/opt/render/.cache/ms-playwright',

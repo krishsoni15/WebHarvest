@@ -21,10 +21,13 @@ import { CaptureRules } from '../crawler/presets';
 import { CrawlLimits } from '../crawler/limits';
 import { getSessionStorageState } from '../auth/manual-login';
 import fs from 'fs/promises';
+import path from 'path';
 
 import { getBaseDownloadDir } from '../resolveDir';
+import { activeJobs } from '../jobStore';
 
 export interface CreateJobInput {
+  id?: string;
   url: string;
   mode?: EngineMode;
   scopeConfig?: Partial<CrawlScopeConfig>;
@@ -39,7 +42,7 @@ export class JobManager {
    * Create, persist, and queue a new website reconstruction job.
    */
   static async createJob(input: CreateJobInput): Promise<JobRecord> {
-    const id = Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
+    const id = input.id || (Date.now().toString(36) + Math.random().toString(36).substring(2, 7));
     const parsed = new URL(input.url);
     const hostname = parsed.hostname;
     const mode = input.mode || 'auto';
@@ -63,6 +66,23 @@ export class JobManager {
     // Job output directory on disk
     const downloadDir = getBaseDownloadDir(id);
     await fs.mkdir(downloadDir, { recursive: true });
+
+    // Save job.json immediately so server restarts & preview route always identify hostname
+    const jobData = {
+      id,
+      url: input.url,
+      hostname,
+      status: 'downloading' as const,
+      addedAt: Date.now(),
+    };
+    try {
+      await fs.writeFile(
+        path.join(downloadDir, 'job.json'),
+        JSON.stringify(jobData, null, 2)
+      );
+    } catch {}
+
+    activeJobs.set(id, jobData);
 
     // 2. Persist record to SQLite
     const record = dbCreateJob({

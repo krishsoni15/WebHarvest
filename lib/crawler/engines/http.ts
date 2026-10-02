@@ -62,10 +62,13 @@ export class HttpCrawler {
     targetUrl: string,
     currentTotalBytes: number = 0,
     discoveredFrom?: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    isAsset: boolean = false
   ): Promise<HttpResponseResult> {
     const urlObj = new URL(targetUrl);
     const hostname = urlObj.hostname;
+    const hasAssetExt = /\.(png|jpe?g|gif|webp|avif|svg|ico|css|js|mjs|woff2?|ttf|eot|mp4|webm|mp3|pdf|json)(\?.*)?$/i.test(targetUrl);
+    const effectiveIsAsset = isAsset || hasAssetExt;
 
     // Acquire concurrency slot for this host
     const release = await this.concurrency.acquire(hostname, 'http');
@@ -82,16 +85,17 @@ export class HttpCrawler {
           {
             headers: {
               'User-Agent': this.userAgent,
-              Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+              Accept: effectiveIsAsset
+                ? 'image/avif,image/webp,image/apng,image/svg+xml,image/*,text/css,*/*;q=0.8'
+                : 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
               'Accept-Language': 'en-US,en;q=0.9',
               'Sec-Ch-Ua': '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
               'Sec-Ch-Ua-Mobile': '?0',
               'Sec-Ch-Ua-Platform': '"Windows"',
-              'Sec-Fetch-Dest': 'document',
-              'Sec-Fetch-Mode': 'navigate',
+              'Sec-Fetch-Dest': effectiveIsAsset ? 'image' : 'document',
+              'Sec-Fetch-Mode': effectiveIsAsset ? 'no-cors' : 'navigate',
               'Sec-Fetch-Site': 'none',
-              'Sec-Fetch-User': '?1',
-              'Upgrade-Insecure-Requests': '1',
+              ...(!effectiveIsAsset ? { 'Sec-Fetch-User': '?1', 'Upgrade-Insecure-Requests': '1' } : {}),
               ...(discoveredFrom ? { Referer: discoveredFrom } : {}),
             },
             signal,
@@ -113,7 +117,12 @@ export class HttpCrawler {
           }
 
           redirectChain.push(currentUrl);
-          const guardDecision = await this.redirectGuard.validate(currentUrl, location, redirectChain);
+          const guardDecision = await this.redirectGuard.validate(
+            currentUrl,
+            location,
+            redirectChain,
+            effectiveIsAsset
+          );
           if (!guardDecision.allowed || !guardDecision.targetURL) {
             throw new Error(`Redirect blocked: ${guardDecision.reason}`);
           }

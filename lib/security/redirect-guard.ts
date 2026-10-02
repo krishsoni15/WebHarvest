@@ -41,11 +41,13 @@ export class RedirectGuard {
    * @param from - Current URL
    * @param to - Redirect destination
    * @param chain - Preceding URLs in this redirect sequence
+   * @param isAsset - True if fetching an asset (image, font, css, script)
    */
   async validate(
     from: string,
     to: string,
-    chain: string[] = []
+    chain: string[] = [],
+    isAsset: boolean = false
   ): Promise<RedirectGuardResult> {
     // 1. Resolve relative URLs against 'from'
     let resolvedURL: string;
@@ -80,18 +82,30 @@ export class RedirectGuard {
       };
     }
 
-    // 5. Domain policy check (if supplied)
-    if (this.policy) {
-      const hostname = new URL(resolvedURL).hostname;
-      if (!this.policy.isAllowedHost(hostname)) {
+    // 5. Domain policy check (if supplied and not an allowed asset)
+    if (this.policy && !isAsset) {
+      const toHostname = new URL(resolvedURL).hostname.toLowerCase();
+      let fromHostname = '';
+      try {
+        fromHostname = new URL(from).hostname.toLowerCase();
+      } catch {}
+
+      const isSameBase = this.isSameBaseDomain(fromHostname, toHostname);
+      const isAllowedHost = this.policy.isAllowedHost(toHostname);
+      const isAllowedCrawl = this.policy.shouldCrawl(resolvedURL);
+
+      // If this is the initial seed URL redirecting (e.g. preview domain -> custom domain), adopt the target
+      if (chain.length === 0 && !isAllowedHost) {
+        this.policy.allowHost(toHostname);
+      } else if (!isSameBase && !isAllowedHost && !isAllowedCrawl) {
         return {
           allowed: false,
-          reason: `Redirected to host '${hostname}' outside domain crawl policy`,
+          reason: `Redirected to host '${toHostname}' outside domain crawl policy`,
         };
       }
     }
 
-    // 6. SSRF / DNS check on the target hostname
+    // 6. SSRF / DNS check on the target hostname (mandatory for all redirects)
     if (this.checkDNS) {
       const hostname = new URL(resolvedURL).hostname;
       const dnsCheck = await dnsGuard(hostname);
@@ -107,5 +121,18 @@ export class RedirectGuard {
       allowed: true,
       targetURL: resolvedURL,
     };
+  }
+
+  /**
+   * Check if two hostnames belong to the same base domain or family (e.g. apex <-> www, subdomains)
+   */
+  private isSameBaseDomain(hostA: string, hostB: string): boolean {
+    if (!hostA || !hostB) return false;
+    if (hostA === hostB) return true;
+    const cleanA = hostA.replace(/^www\./, '');
+    const cleanB = hostB.replace(/^www\./, '');
+    if (cleanA === cleanB) return true;
+    if (cleanA.endsWith(`.${cleanB}`) || cleanB.endsWith(`.${cleanA}`)) return true;
+    return false;
   }
 }

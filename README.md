@@ -39,13 +39,23 @@
 
 Modern websites are rarely just simple static HTML files. Modern web applications built with **React**, **Next.js**, **Vue**, **Angular**, and **Vite** rely heavily on dynamic JavaScript chunking, client-side routing (`history.pushState`), external fonts, media assets, and authenticated user states.
 
-Traditional mirror utilities (like `wget` or `httrack`) often fail on modern websites:
-- They break on Single-Page Application (SPA) client-side routes, yielding blank 404 screens.
-- They cannot capture dynamic client-rendered assets and background chunks.
-- They get stuck behind login forms and authentication barriers.
-- They cannot be run offline without configuring complex local web servers or reverse proxies.
+### ❌ What Traditional Tools Lack vs ✅ What WebHarvest Solves
 
-**WebHarvest** solves this entirely. It is a full-stack, local-first web intelligence and website cloning studio. It captures websites dynamically, streams real-time capture logs via Server-Sent Events (SSE), serves live sandboxed previews across device chassis (Desktop, Laptop, Tablet, Mobile), provides an interactive code & asset inspector, and packages everything into **zero-dependency standalone runnable archives** (`.zip`) that run anywhere using native Node.js or Python.
+| Challenge | ❌ Legacy Scrapers (`wget`, `httrack`) | ✅ WebHarvest Intelligent Studio |
+| :--- | :--- | :--- |
+| **Client-Side SPAs** | Fails; renders blank empty HTML shells | Boots Playwright Chromium to execute hydration until 100% network idle |
+| **Next.js Chunks** | Breaks on dynamic webpack/vite chunk paths | Reverse asset middleware routes chunks with zero collisions or 404s |
+| **Auth & Dashboards** | Blocked at login forms and session redirects | Injects demo credentials, auth cookies, and intercepts forms offline |
+| **External CDNs** | Leaves external Google Fonts/unpkg URLs active | AST rewriter localizes external CSS/fonts directly into `./assets/` |
+| **Local Offline Run** | Requires setting up local Nginx/Apache servers | Zero-dependency standalone ZIP runnable with `node server.js` or `python3 serve.py` |
+| **Live Inspection** | Requires manual file extraction and opening | Multi-chassis sandboxed preview (Desktop, Laptop, Tablet, Mobile) with live SSE trace |
+
+### 🎯 Key Real-World Use Cases
+
+1. **Air-Gapped Developer Portals**: Mirror massive technical documentation sites (Stripe, Tailwind, React.dev) for offline travel or high-security offline corporate networks.
+2. **Pixel-Fidelity Design Archival**: Snapshot intricate SaaS landing pages, animated dashboards, CSS keyframe micro-interactions, and component libraries with complete visual accuracy.
+3. **Legal, Compliance & Pricing Audits**: Create immutable, timestamped point-in-time mirrors with SHA-256 asset manifests and HTTP header audit trails.
+4. **Offline AI & RAG Knowledge Ingestion**: Extract sanitized, structured DOM hierarchies and catalogs for local LLM vector embeddings (LangChain, LlamaIndex, Ollama).
 
 ---
 
@@ -94,32 +104,32 @@ WebHarvest is engineered with a modular architecture separating presentation, st
 ```mermaid
 flowchart TB
     subgraph ClientLayer["🖥️ Presentation Layer (Studio & Landing)"]
-        UI["Landing Dashboard (/)\n• URL Capture Input & Presets\n• Scope & Auth Config"]
-        Studio["Mirror Studio (/mirror/[id])\n• 4 Viewport Chassis (Desktop/Tablet/Mobile)\n• In-Place Tabs (Dash, Pages, Assets, Files)\n• Real-Time Draggable Terminal"]
+        UI["Landing Dashboard (/)\n• URL Capture Input & 4 Presets\n• Scope & Auth Injection Config\n• Responsive Architecture Section"]
+        Studio["Mirror Studio (/mirror/[id])\n• 4 Viewport Chassis (Desktop/Laptop/Tablet/Mobile)\n• In-Place Tabs (Dash, Pages, Assets, Files)\n• Real-Time Draggable SSE Terminal"]
     end
 
     subgraph APILayer["⚡ Next.js App Router (Streaming & Reverse Proxy)"]
-        Dispatch["POST /api/mirror\n• URL Normalizer & DNS Guard\n• Job Dispatcher"]
+        Dispatch["POST /api/mirror\n• URL Normalizer & SSRF DNS Guard\n• Canonical Job Manager & Dispatcher"]
         SSE["GET /api/mirror/[id]/progress\n• Server-Sent Events (SSE)\n• Live Terminal & Stats Stream"]
-        Sandbox["GET /api/mirror/[id]/preview\n• Dynamic MIME Overrides\n• SPA Fallback Rewriter"]
-        Middleware["Reverse Asset Middleware\n• Intercepts /_next, /assets\n• Auto-reroutes to Sandbox"]
-        Exporter["GET /api/download/[id]\n• Streamed ZIP Packaging\n• Standalone Runner Generator"]
+        Sandbox["GET /api/mirror/[id]/preview\n• Multi-Tier Path & SPA Fallback (Tier 1-6)\n• Dynamic MIME Overrides & On-Demand Proxy\n• Offline Session & Credential Pre-hydration"]
+        Middleware["Reverse Asset Middleware (middleware.ts)\n• Intercepts /_next/static & /assets\n• Referer-based Sandbox Rewriting"]
+        Exporter["GET /api/download/[id]\n• Streamed ZIP Packaging\n• Standalone Multi-Threaded Generator"]
     end
 
-    subgraph EngineLayer["🕷️ Crawling, Extraction & AST Rewriting Engine"]
-        DNS["Security & DNS Guard\n• SSRF & Loopback Filter\n• Redirect Chain Resolver"]
-        Crawler["Hybrid Crawler Engine\n• Fast HTTP Client\n• Headless Browser (DOM)"]
-        Parser["Parser & Link Rewriter\n• AST HTML/CSS/JS Traverser\n• Root-to-Relative URL Rewriter"]
-        Auth["Auth Interceptor\n• Session Pre-hydration\n• Token & Cookie Injection"]
+    subgraph EngineLayer["🕷️ Crawling, Detection & AST Rewriting Engine"]
+        DNS["Security & DNS Guard\n• SSRF & Loopback Filter (127.0.0.1, LAN)\n• Redirect Chain Resolver"]
+        Crawler["Hybrid Crawler Engine\n• Fast HTTP Streaming Client (180+ pgs/s)\n• Playwright Headless Chromium (DOM Hydration)\n• Action Shield Mutate Guard (Blocks POST/Logout)"]
+        Parser["Parser & Link Rewriter\n• AST HTML/CSS/JS Traverser\n• Root-to-Relative URL Rewriter\n• External CDN Font Localizer (Google/Bunny)"]
+        Auth["Auth Interceptor\n• Session Pre-hydration\n• Token & Cookie Injection\n• Demo Login Interceptor"]
     end
 
     subgraph StorageLayer["💾 Dual Persistence Storage"]
-        SQLite[("SQLite Database (data/webharvest.db)\n• WAL Journaling Mode\n• Jobs, Progress, & Error Logs\n• Auth Profiles & Health Audits")]
+        SQLite[("SQLite Database (data/webharvest.db)\n• WAL Journaling Mode\n• Canonical Jobs, Progress, & Error Logs\n• Auth Profiles & Health Audits")]
         FileSystem[("Local Storage (downloads/[id]/)\n• Mirrored HTML / CSS / JS Chunks\n• Vector & Raster Images\n• Web Fonts & Manifests")]
     end
 
     subgraph OfflineBundle["📦 Standalone Offline Bundle"]
-        Bundle["Generated .ZIP Archive\n• server.js (Node.js Standard Lib)\n• serve.py (Python 3 Multi-threaded)\n• start.sh & start.bat\n• Archive-Tailored README.md"]
+        Bundle["Generated .ZIP Archive\n• server.js (Node.js Standard Lib - Zero npm)\n• serve.py (Python 3 Multi-threaded)\n• start.sh & start.bat (1-Click Launchers)\n• Archive-Tailored README.md & Manifest"]
     end
 
     UI -->|1. Submit Target URL| Dispatch
@@ -141,9 +151,10 @@ flowchart TB
 
 ### Architectural Highlights
 
-1. **State Persistence**: Uses **SQLite via better-sqlite3** with Write-Ahead Logging (`WAL` mode) for reliable job management, error logging, and authentication profiles that survive server restarts.
-2. **Reverse Asset Middleware**: The custom `middleware.ts` intercepts root-relative asset requests (e.g. `/_next/...`, `/assets/...`, `/fonts/...`) emitted by mirrored SPAs and dynamically rewrites them to the appropriate sandboxed preview endpoint (`/api/mirror/[id]/preview/...`).
-3. **Dual Storage Model**: High-performance metadata and job states live in **SQLite**, while raw binary and text assets (`.html`, `.js`, `.css`, `.woff2`, `.png`) live directly on the **Local Filesystem** to enable high-throughput streaming and instant zero-dependency ZIP packaging.
+1. **State Persistence**: Uses **SQLite via better-sqlite3** with Write-Ahead Logging (`WAL` mode) for non-blocking concurrent writes, canonical job ID mapping, and crash-resilient metadata tracking that survives server restarts.
+2. **Reverse Asset Middleware**: The custom `middleware.ts` intercepts root-relative asset requests (e.g. `/_next/static/...`, `/assets/...`, `/fonts/...`) emitted by mirrored SPAs via referer inspection and dynamically rewrites them to the sandboxed preview endpoint (`/api/mirror/[id]/preview/...`), eliminating chunk collisions with WebHarvest's own bundle.
+3. **Multi-Tier Resolution & On-Demand Proxy**: The sandbox preview router resolves files across 6 tiers: Exact Path -> Target Directory -> Base Directory -> Recursive Chunk Finder -> Single-Page Application (SPA) Fallback (`index.html`) -> Live On-Demand Proxy Cache.
+4. **Dual Storage Model**: High-performance metadata and job states live in **SQLite**, while raw binary and text assets (`.html`, `.js`, `.css`, `.woff2`, `.png`) live directly on the **Local Filesystem** to enable high-throughput streaming and instant zero-dependency ZIP packaging.
 
 ---
 

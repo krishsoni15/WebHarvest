@@ -155,26 +155,31 @@ import { getJob } from './db/client';
  * Used by routes that may be called after a server restart (hot reload).
  */
 export function ensureJobExists(id: string): boolean {
-  if (activeJobs.has(id)) {
-    const job = activeJobs.get(id)!;
-    if (job.status !== 'completed' && job.status !== 'failed') {
+  const existingJob = activeJobs.get(id);
+  const isInvalidHostname =
+    !existingJob?.hostname ||
+    ['assets', 'logs', 'data', 'pages', 'screenshots', 'mirrored-site'].includes(existingJob.hostname.toLowerCase()) ||
+    !existingJob.hostname.includes('.');
+
+  if (existingJob && !isInvalidHostname) {
+    if (existingJob.status !== 'completed' && existingJob.status !== 'failed') {
       try {
         const dbRecord = getJob(id);
         if (dbRecord && (dbRecord.status === 'completed' || dbRecord.status === 'failed')) {
-          job.status = dbRecord.status === 'completed' ? 'completed' : 'failed';
-          job.completedAt = dbRecord.completed_at || undefined;
-          if (dbRecord.error_message) job.error = dbRecord.error_message;
-          activeJobs.set(id, job);
+          existingJob.status = dbRecord.status === 'completed' ? 'completed' : 'failed';
+          existingJob.completedAt = dbRecord.completed_at || undefined;
+          if (dbRecord.error_message) existingJob.error = dbRecord.error_message;
+          activeJobs.set(id, existingJob);
         } else {
           const baseDir = getBaseDownloadDir(id);
           const jobJsonPath = path.join(baseDir, 'job.json');
           if (fs.existsSync(jobJsonPath)) {
             const diskData = JSON.parse(fs.readFileSync(jobJsonPath, 'utf-8'));
             if (diskData?.status === 'completed' || diskData?.status === 'failed') {
-              job.status = diskData.status;
-              job.completedAt = diskData.completedAt;
-              if (diskData.error) job.error = diskData.error;
-              activeJobs.set(id, job);
+              existingJob.status = diskData.status;
+              existingJob.completedAt = diskData.completedAt;
+              if (diskData.error) existingJob.error = diskData.error;
+              activeJobs.set(id, existingJob);
             }
           }
         }
@@ -186,7 +191,7 @@ export function ensureJobExists(id: string): boolean {
   // 1. Check persistent SQLite database
   try {
     const dbRecord = getJob(id);
-    if (dbRecord) {
+    if (dbRecord && dbRecord.hostname && dbRecord.hostname.includes('.')) {
       activeJobs.set(id, {
         id: dbRecord.id,
         url: dbRecord.url,
@@ -201,17 +206,71 @@ export function ensureJobExists(id: string): boolean {
   } catch {}
 
   const baseDir = getBaseDownloadDir(id);
-
   if (!fs.existsSync(baseDir)) return false;
 
+  // 2. Check job.json on disk
   const jobJsonPath = path.join(baseDir, 'job.json');
   if (fs.existsSync(jobJsonPath)) {
     try {
       const data = JSON.parse(fs.readFileSync(jobJsonPath, 'utf-8'));
-      activeJobs.set(id, data);
-      return true;
+      if (data?.hostname && data.hostname.includes('.') && !['assets', 'logs', 'data', 'pages'].includes(data.hostname.toLowerCase())) {
+        activeJobs.set(id, data);
+        return true;
+      }
     } catch {}
   }
+
+  // 3. Check report.json (contains authoritative seedUrl from V3 crawl engine)
+  const reportJsonPath = path.join(baseDir, 'report.json');
+  if (fs.existsSync(reportJsonPath)) {
+    try {
+      const report = JSON.parse(fs.readFileSync(reportJsonPath, 'utf-8'));
+      if (report.seedUrl) {
+        const seedHostname = new URL(report.seedUrl).hostname;
+        const jobData = {
+          id,
+          url: report.seedUrl,
+          hostname: seedHostname,
+          status: (report.completedAt ? 'completed' : 'downloading') as 'completed' | 'downloading',
+          addedAt: report.counters?.startTime || Date.now(),
+        };
+        activeJobs.set(id, jobData);
+        try {
+          fs.writeFileSync(jobJsonPath, JSON.stringify(jobData, null, 2));
+        } catch {}
+        return true;
+      }
+    } catch {}
+  }
+
+  // 4. Check manifest.json
+  const manifestJsonPath = path.join(baseDir, 'manifest.json');
+  if (fs.existsSync(manifestJsonPath)) {
+    try {
+      const manifest = JSON.parse(fs.readFileSync(manifestJsonPath, 'utf-8'));
+      if (manifest.startUrl) {
+        const startHostname = new URL(manifest.startUrl).hostname;
+        const jobData = {
+          id,
+          url: manifest.startUrl,
+          hostname: startHostname,
+          status: 'completed' as const,
+          addedAt: Date.now(),
+        };
+        activeJobs.set(id, jobData);
+        try {
+          fs.writeFileSync(jobJsonPath, JSON.stringify(jobData, null, 2));
+        } catch {}
+        return true;
+      }
+    } catch {}
+  }
+
+  // 5. Fallback directory inspection (ignoring internal system directories)
+  const INTERNAL_DIRS = new Set([
+    'assets', 'pages', 'logs', 'analysis', 'screenshots', 'data',
+    'node_modules', '.git', 'css', 'js', 'fonts', 'images',
+  ]);
 
   try {
     const items = fs.readdirSync(baseDir).filter(f => !f.startsWith('.') && f !== 'crawl_logs.txt' && f !== 'job.json');
@@ -219,35 +278,37 @@ export function ensureJobExists(id: string): boolean {
 
     const subdirs = items.filter(f => {
       try {
-        return fs.statSync(path.join(baseDir, f)).isDirectory();
+        return fs.statSync(path.join(baseDir, f)).isDirectory() && !INTERNAL_DIRS.has(f.toLowerCase());
       } catch {
         return false;
       }
     });
 
-    let bestHostname = 'mirrored-site';
-    let maxFiles = -1;
+    if (subdirs.length > 0) {
+      let bestHostname = subdirs[0];
+      let maxFiles = -1;
 
-    for (const dir of subdirs) {
-      const count = countFilesRecursive(path.join(baseDir, dir));
-      if (count > maxFiles) {
-        maxFiles = count;
-        bestHostname = dir;
+      for (const dir of subdirs) {
+        const count = countFilesRecursive(path.join(baseDir, dir));
+        if (count > maxFiles) {
+          maxFiles = count;
+          bestHostname = dir;
+        }
       }
+
+      activeJobs.set(id, {
+        id,
+        url: `https://${bestHostname}`,
+        hostname: bestHostname,
+        status: 'completed',
+        addedAt: Date.now(),
+      });
+
+      return true;
     }
+  } catch {}
 
-    activeJobs.set(id, {
-      id,
-      url: `https://${bestHostname}`,
-      hostname: bestHostname,
-      status: 'completed',
-      addedAt: Date.now(),
-    });
-
-    return true;
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 /** Cache the resolved directory on the job object for stability */

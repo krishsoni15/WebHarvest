@@ -11,6 +11,7 @@ import {
   Trash2,
   Search,
   ArrowDown,
+  Download,
 } from 'lucide-react';
 
 interface DraggableTerminalProps {
@@ -34,6 +35,7 @@ export function DraggableTerminal({
 }: DraggableTerminalProps) {
   const [isMinimized, setIsMinimized] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const [searchFilter, setSearchFilter] = useState('');
   const [copied, setCopied] = useState(false);
@@ -42,6 +44,18 @@ export function DraggableTerminal({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
+
+  // Mobile detection
+  useEffect(() => {
+    const checkMobile = () => {
+      if (typeof window !== 'undefined') {
+        setIsMobile(window.innerWidth < 768);
+      }
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Drag state kept in refs to avoid re-renders during dragging
   const posRef = useRef({ x: -1, y: -1 });
@@ -113,11 +127,11 @@ export function DraggableTerminal({
     window.addEventListener('mouseup', handleMouseUp);
   }, [isMaximized, handleMouseMove, handleMouseUp]);
 
-  // Real-time log polling during active crawl
+  // Load initial logs on open if not already streamed via SSE props
   useEffect(() => {
-    if (!isCrawling || !open || !jobId) return;
+    if (!open || !jobId || (logs && logs.length > 0)) return;
     let cancelled = false;
-    const poll = async () => {
+    const fetchInitial = async () => {
       try {
         const res = await fetch(`/api/mirror/${jobId}/logs`);
         if (res.ok) {
@@ -128,10 +142,9 @@ export function DraggableTerminal({
         }
       } catch {}
     };
-    poll();
-    const interval = setInterval(poll, 2000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [isCrawling, open, jobId]);
+    fetchInitial();
+    return () => { cancelled = true; };
+  }, [open, jobId, logs]);
 
   // Merge passed logs with streamed logs
   const effectiveLogs = (streamedLogs && streamedLogs.length > (logs || '').length) ? streamedLogs : logs;
@@ -214,7 +227,21 @@ export function DraggableTerminal({
     <div
       ref={containerRef}
       style={
-        isMaximized
+        isMobile
+          ? {
+              position: 'fixed',
+              left: 0,
+              right: 0,
+              bottom: 0,
+              width: '100vw',
+              height: '82vh',
+              zIndex: 9999,
+              borderTopLeftRadius: '1rem',
+              borderTopRightRadius: '1rem',
+              borderBottomLeftRadius: 0,
+              borderBottomRightRadius: 0,
+            }
+          : isMaximized
           ? {
               position: 'fixed',
               top: '20px',
@@ -229,18 +256,20 @@ export function DraggableTerminal({
               position: 'fixed',
               left: `${posRef.current.x}px`,
               top: `${posRef.current.y}px`,
-              width: '640px',
+              width: '660px',
               maxWidth: 'calc(100vw - 32px)',
-              height: '460px',
+              height: '480px',
               maxHeight: 'calc(100vh - 64px)',
               zIndex: 9999,
             }
       }
-      className="flex flex-col rounded-xl bg-zinc-950/95 border border-zinc-800 shadow-2xl overflow-hidden backdrop-blur-md select-none"
+      className={`flex flex-col bg-zinc-950/95 border border-zinc-800 shadow-2xl overflow-hidden backdrop-blur-md select-none ${
+        isMobile ? 'rounded-t-2xl' : 'rounded-xl'
+      }`}
     >
       {/* Title Bar (Drag Handle) */}
       <div
-        onMouseDown={handleMouseDown}
+        onMouseDown={isMobile ? undefined : handleMouseDown}
         className="px-3 py-2.5 bg-zinc-900/90 border-b border-zinc-800 flex items-center justify-between cursor-grab shrink-0 active:cursor-grabbing"
       >
         {/* macOS Style Traffic Dots */}
@@ -253,35 +282,39 @@ export function DraggableTerminal({
           >
             <X className="w-2 h-2 text-red-950 opacity-0 group-hover:opacity-100 transition-opacity" />
           </button>
-          <button
-            type="button"
-            onClick={() => setIsMinimized(true)}
-            className="w-3 h-3 rounded-full bg-amber-500/80 hover:bg-amber-500 flex items-center justify-center transition-colors cursor-pointer group"
-            title="Minimize"
-          >
-            <Minus className="w-2 h-2 text-amber-950 opacity-0 group-hover:opacity-100 transition-opacity" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsMaximized(!isMaximized)}
-            className="w-3 h-3 rounded-full bg-emerald-500/80 hover:bg-emerald-500 flex items-center justify-center transition-colors cursor-pointer group"
-            title={isMaximized ? 'Restore size' : 'Maximize'}
-          >
-            <Maximize2 className="w-2 h-2 text-emerald-950 opacity-0 group-hover:opacity-100 transition-opacity" />
-          </button>
+          {!isMobile && (
+            <>
+              <button
+                type="button"
+                onClick={() => setIsMinimized(true)}
+                className="w-3 h-3 rounded-full bg-amber-500/80 hover:bg-amber-500 flex items-center justify-center transition-colors cursor-pointer group"
+                title="Minimize"
+              >
+                <Minus className="w-2 h-2 text-amber-950 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsMaximized(!isMaximized)}
+                className="w-3 h-3 rounded-full bg-emerald-500/80 hover:bg-emerald-500 flex items-center justify-center transition-colors cursor-pointer group"
+                title={isMaximized ? 'Restore size' : 'Maximize'}
+              >
+                <Maximize2 className="w-2 h-2 text-emerald-950 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+            </>
+          )}
         </div>
 
         {/* Window Title */}
-        <div className="flex items-center gap-2 text-xs font-mono text-zinc-300 pointer-events-none">
-          <Terminal className="w-3.5 h-3.5 text-zinc-400" />
-          <span className="font-semibold text-zinc-200">
+        <div className="flex items-center gap-2 text-xs font-mono text-zinc-300 pointer-events-none truncate max-w-[220px] sm:max-w-xs">
+          <Terminal className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+          <span className="font-semibold text-zinc-200 truncate">
             webharvest: stream-logs
           </span>
-          <span className="text-[10px] text-zinc-500 font-mono">
+          <span className="text-[10px] text-zinc-500 font-mono hidden sm:inline">
             PID:{jobId.slice(0, 8)}
           </span>
           {isCrawling && (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
               LIVE
             </span>
@@ -290,6 +323,14 @@ export function DraggableTerminal({
 
         {/* Quick Actions */}
         <div className="flex items-center gap-1">
+          <a
+            href={`/api/mirror/${jobId}/logs?download=true`}
+            download={`${hostname || 'crawl'}-logs.txt`}
+            className="p-1 rounded text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 transition-colors cursor-pointer"
+            title="Download full raw log file (.txt)"
+          >
+            <Download className="w-3.5 h-3.5" />
+          </a>
           <button
             type="button"
             onClick={handleCopy}
@@ -343,9 +384,20 @@ export function DraggableTerminal({
             <span>Auto-scroll</span>
           </button>
 
-          <span className="text-[10px] text-zinc-500">
-            {filteredLines.length} {filteredLines.length === 1 ? 'line' : 'lines'}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-zinc-500">
+              {filteredLines.length} {filteredLines.length === 1 ? 'line' : 'lines'}
+            </span>
+            <a
+              href={`/api/mirror/${jobId}/logs?download=true`}
+              download={`${hostname || 'crawl'}-logs.txt`}
+              className="text-[10px] text-emerald-400 hover:text-emerald-300 hover:underline flex items-center gap-1 transition-colors"
+              title="Download entire raw log file"
+            >
+              <Download className="w-2.5 h-2.5" />
+              <span>Raw</span>
+            </a>
+          </div>
         </div>
       </div>
 
@@ -367,7 +419,7 @@ export function DraggableTerminal({
             } else if (line.includes('[WARN]') || line.toLowerCase().includes('warning') || line.toLowerCase().includes('retry')) {
               color = 'text-amber-400';
             } else if (line.includes('[PLAYWRIGHT]') || line.includes('[BROWSER]')) {
-              color = 'text-purple-400';
+              color = 'text-zinc-200';
             } else if (line.includes('[FETCH]') || line.includes('[HTTP]')) {
               color = 'text-sky-400';
             } else if (line.includes('[PAGE]') || line.includes('[DISCOVERED]') || line.includes('[CRAWL]')) {

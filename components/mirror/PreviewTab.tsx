@@ -84,17 +84,17 @@ export function PreviewTab({
   colors = ['#e11d48', '#06b6d4', '#10b981', '#84cc16', '#a855f7'],
   assetsList = [],
   crawlLogs = '',
-  onBrowseFiles = () => {},
-  onBrowseAssets = () => {},
+  onBrowseFiles = () => { },
+  onBrowseAssets = () => { },
   onOpenLogs,
-  onDownloadZip = () => {},
+  onDownloadZip = () => { },
   isDownloadingZip = false,
 }: PreviewTabProps) {
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
   const [sidebarTab, setSidebarTab] = useState<'dashboard' | 'pages' | 'assets' | 'files'>('dashboard');
   const [viewport, setViewport] = useState<'desktop' | 'laptop' | 'tablet' | 'mobile'>('desktop');
   const [pageFilter, setPageFilter] = useState<'all' | 'dashboards' | 'apps' | 'auth'>('all');
-  const [assetFilter, setAssetFilter] = useState<'all' | 'image' | 'css' | 'js' | 'font'>('all');
+  const [assetFilter, setAssetFilter] = useState<'all' | 'image' | 'media' | 'css' | 'js' | 'font'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [assetSearchQuery, setAssetSearchQuery] = useState('');
   const [fileSearchQuery, setFileSearchQuery] = useState('');
@@ -108,6 +108,7 @@ export function PreviewTab({
   const [isWideView, setIsWideView] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isPagesDrawerOpen, setIsPagesDrawerOpen] = useState(false);
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
 
   // Automatically select first valid page if previewPath is index.html but index.html is not in htmlPages
   useEffect(() => {
@@ -146,7 +147,7 @@ export function PreviewTab({
         if (iframeRef.current?.contentWindow) {
           iframeRef.current.contentWindow.location.reload();
         }
-      } catch {}
+      } catch { }
     }, 15000);
     return () => clearInterval(interval);
   }, [isCrawling, autoRefresh]);
@@ -211,10 +212,10 @@ export function PreviewTab({
     pageFilter === 'dashboards'
       ? dashboardPages
       : pageFilter === 'apps'
-      ? appPages
-      : pageFilter === 'auth'
-      ? authPages
-      : htmlPages;
+        ? appPages
+        : pageFilter === 'auth'
+          ? authPages
+          : htmlPages;
 
   const filteredPages = pagesByFilter.filter((p) =>
     p.toLowerCase().includes(searchQuery.toLowerCase())
@@ -326,7 +327,7 @@ export function PreviewTab({
         win.localStorage.setItem('accessToken', 'webharvest_demo_authenticated_token');
         setKey((k) => k + 1);
       }
-    } catch {}
+    } catch { }
   };
 
   const handleAutoLoginHarvest = async (emailToUse?: string, passToUse?: string) => {
@@ -350,6 +351,21 @@ export function PreviewTab({
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok || data.success === false) {
+        // Fallback: If server-side Chromium login fails (e.g. Render container where headless browser cannot run),
+        // seamlessly unlock the client session and navigate to the best captured dashboard
+        const targetDashboard = getBestDashboardPage();
+        if (targetDashboard) {
+          handleUnlockPreviewSession(finalEmail);
+          onChangePreviewPath(targetDashboard);
+          setLoginStatusMsg('Offline Session Active: Unlocking Dashboard...');
+          setTimeout(() => {
+            setIsLoggingIn(false);
+            setLoginStatusMsg(null);
+            setKey((k) => k + 1);
+          }, 800);
+          return;
+        }
+
         const errMsg = data.error || 'Authentication rejected: Invalid user ID or password.';
         setLoginError(errMsg);
         setLoginStatusMsg(null);
@@ -408,85 +424,83 @@ export function PreviewTab({
     <div className="flex flex-col lg:flex-row gap-2.5 w-full h-full flex-1 min-h-0 relative overflow-hidden">
       {/* Main Browser / Code Frame */}
       <div className="flex-1 min-w-0 rounded-xl border border-border bg-card flex flex-col h-full min-h-0 overflow-hidden transition-all duration-300">
-        {/* Browser Top Navigation Bar */}
-        <div className="bg-muted/40 border-b border-border px-3 py-1.5 flex items-center justify-between gap-2 text-xs shrink-0">
-          {/* Back, Forward, Reload */}
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => {
-                try {
-                  iframeRef.current?.contentWindow?.history.back();
-                } catch {}
-              }}
-              className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              title="Back"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                try {
-                  iframeRef.current?.contentWindow?.history.forward();
-                } catch {}
-              }}
-              className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              title="Forward"
-            >
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={handleReloadFrame}
-              className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              title="Reload frame"
-            >
-              <RotateCw className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {/* Address Bar */}
-          <div className="flex-1 max-w-lg mx-2 flex items-center justify-between gap-2 bg-background border border-border rounded-md px-2.5 py-1 text-xs font-mono text-foreground truncate">
-            <div className="flex items-center gap-2 truncate flex-1">
-              <Lock className="w-3 h-3 text-muted-foreground shrink-0" />
-              <span className="truncate">{displayUrl}</span>
-            </div>
-            {isCrawling && (
-              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono bg-foreground/10 text-foreground border border-border shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-foreground animate-ping" />
-                <span>LIVE STREAM</span>
-              </span>
-            )}
-          </div>
-
-          {/* Controls Right */}
-          <div className="flex items-center gap-1.5">
-            {isCrawling && (
+        {/* Browser Top Navigation Bar - Responsive 2-tier on mobile (<sm), single unified bar on desktop (sm+) */}
+        <div className="bg-muted/40 border-b border-border px-2 sm:px-3 py-1.5 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-2 text-xs shrink-0">
+          {/* Tier 1: History + Address Bar + External Link */}
+          <div className="flex items-center gap-1 sm:gap-1.5 flex-1 min-w-0 w-full sm:w-auto">
+            {/* Back, Forward, Reload */}
+            <div className="flex items-center gap-0.5 shrink-0">
               <button
                 type="button"
-                onClick={() => setAutoRefresh(!autoRefresh)}
-                className={`hidden md:flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono transition-colors cursor-pointer border ${
-                  autoRefresh
-                    ? 'border-foreground/30 bg-muted text-foreground'
-                    : 'border-border text-muted-foreground hover:text-foreground'
-                }`}
-                title={autoRefresh ? 'Auto-refresh is active' : 'Click to enable auto-refresh'}
+                onClick={() => {
+                  try {
+                    iframeRef.current?.contentWindow?.history.back();
+                  } catch { }
+                }}
+                className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                title="Back"
               >
-                <RotateCw className={`w-3 h-3 ${autoRefresh ? 'animate-spin' : ''}`} style={{ animationDuration: '6s' }} />
-                <span>Auto-sync</span>
+                <ArrowLeft className="w-3.5 h-3.5" />
               </button>
-            )}
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    iframeRef.current?.contentWindow?.history.forward();
+                  } catch { }
+                }}
+                className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                title="Forward"
+              >
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={handleReloadFrame}
+                className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                title="Reload frame"
+              >
+                <RotateCw className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Address Bar - takes full remaining space on mobile and up to max-w-lg on desktop */}
+            <div className="flex-1 sm:max-w-lg mx-0.5 sm:mx-2 flex items-center justify-between gap-1.5 bg-background border border-border rounded-md px-2 sm:px-2.5 py-1 text-xs font-mono text-foreground min-w-0 shadow-2xs">
+              <div className="flex items-center gap-1.5 truncate flex-1 min-w-0">
+                <Lock className="w-3 h-3 text-muted-foreground shrink-0" />
+                <span className="truncate text-[11px] sm:text-xs">{displayUrl}</span>
+              </div>
+              {isCrawling && (
+                <span className="hidden xs:flex items-center gap-1 px-1.5 py-0.2 rounded text-[9px] sm:text-[10px] font-mono bg-foreground/10 text-foreground border border-border shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-foreground animate-ping" />
+                  <span className="hidden sm:inline">LIVE STREAM</span>
+                  <span className="sm:hidden">LIVE</span>
+                </span>
+              )}
+            </div>
+
+            {/* External Link on Mobile Tier 1 */}
+            <button
+              type="button"
+              onClick={handleOpenExternally}
+              className="p-1 text-muted-foreground hover:text-foreground transition-colors cursor-pointer sm:hidden shrink-0"
+              title="Open standalone preview in new tab"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Tier 2: View Switchers & Explorer Drawer */}
+          <div className="flex items-center justify-between sm:justify-end gap-1.5 w-full sm:w-auto shrink-0 pt-0.5 sm:pt-0 border-t border-border/40 sm:border-t-0">
             {/* Toggle View: Preview vs Code */}
-            <div className="flex items-center bg-background border border-border rounded-md p-0.5">
+            <div className="flex items-center bg-background border border-border rounded-md p-0.5 shadow-2xs">
               <button
                 type="button"
                 onClick={() => setViewMode('preview')}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors cursor-pointer font-medium ${
-                  viewMode === 'preview'
+                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors cursor-pointer font-medium ${viewMode === 'preview'
                     ? 'bg-foreground text-background font-semibold'
                     : 'text-muted-foreground hover:text-foreground'
-                }`}
+                  }`}
               >
                 <Eye className="w-3.5 h-3.5" />
                 <span>Preview</span>
@@ -494,28 +508,26 @@ export function PreviewTab({
               <button
                 type="button"
                 onClick={() => setViewMode('code')}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors cursor-pointer font-medium ${
-                  viewMode === 'code'
+                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors cursor-pointer font-medium ${viewMode === 'code'
                     ? 'bg-foreground text-background font-semibold'
                     : 'text-muted-foreground hover:text-foreground'
-                }`}
+                  }`}
               >
                 <Code className="w-3.5 h-3.5" />
                 <span>Code</span>
               </button>
             </div>
 
-            {/* Viewport Toggles (only in preview mode) */}
+            {/* Viewport Toggles (desktop and tablet only) */}
             {viewMode === 'preview' && (
               <div className="hidden sm:flex items-center bg-background border border-border rounded-md p-0.5">
                 <button
                   type="button"
                   onClick={() => setViewport('desktop')}
-                  className={`p-1 rounded text-xs cursor-pointer ${
-                    viewport === 'desktop'
+                  className={`p-1 rounded text-xs cursor-pointer ${viewport === 'desktop'
                       ? 'bg-muted text-foreground'
                       : 'text-muted-foreground hover:text-foreground'
-                  }`}
+                    }`}
                   title="Desktop (100% Widescreen)"
                 >
                   <Monitor className="w-3.5 h-3.5" />
@@ -523,11 +535,10 @@ export function PreviewTab({
                 <button
                   type="button"
                   onClick={() => setViewport('laptop')}
-                  className={`p-1 rounded text-xs cursor-pointer ${
-                    viewport === 'laptop'
+                  className={`p-1 rounded text-xs cursor-pointer ${viewport === 'laptop'
                       ? 'bg-muted text-foreground'
                       : 'text-muted-foreground hover:text-foreground'
-                  }`}
+                    }`}
                   title="Laptop (1024px MacBook)"
                 >
                   <Laptop className="w-3.5 h-3.5" />
@@ -535,11 +546,10 @@ export function PreviewTab({
                 <button
                   type="button"
                   onClick={() => setViewport('tablet')}
-                  className={`p-1 rounded text-xs cursor-pointer ${
-                    viewport === 'tablet'
+                  className={`p-1 rounded text-xs cursor-pointer ${viewport === 'tablet'
                       ? 'bg-muted text-foreground'
                       : 'text-muted-foreground hover:text-foreground'
-                  }`}
+                    }`}
                   title="Tablet (768px iPad)"
                 >
                   <Tablet className="w-3.5 h-3.5" />
@@ -547,11 +557,10 @@ export function PreviewTab({
                 <button
                   type="button"
                   onClick={() => setViewport('mobile')}
-                  className={`p-1 rounded text-xs cursor-pointer ${
-                    viewport === 'mobile'
+                  className={`p-1 rounded text-xs cursor-pointer ${viewport === 'mobile'
                       ? 'bg-muted text-foreground'
                       : 'text-muted-foreground hover:text-foreground'
-                  }`}
+                    }`}
                   title="Mobile (390px Phone)"
                 >
                   <Smartphone className="w-3.5 h-3.5" />
@@ -562,61 +571,72 @@ export function PreviewTab({
               </div>
             )}
 
-            {/* Sidebar / View Toggle — single unified button */}
+            {/* Auto-sync during active crawl (desktop only) */}
+            {isCrawling && (
+              <button
+                type="button"
+                onClick={() => setAutoRefresh(!autoRefresh)}
+                className={`hidden md:flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono transition-colors cursor-pointer border ${autoRefresh
+                    ? 'border-foreground/30 bg-muted text-foreground'
+                    : 'border-border text-muted-foreground hover:text-foreground'
+                  }`}
+                title={autoRefresh ? 'Auto-refresh is active' : 'Click to enable auto-refresh'}
+              >
+                <RotateCw className={`w-3 h-3 ${autoRefresh ? 'animate-spin' : ''}`} style={{ animationDuration: '6s' }} />
+                <span>Auto-sync</span>
+              </button>
+            )}
+
+            {/* Desktop Wide View toggle (only on lg+ where sidebar exists) */}
             <button
               type="button"
               onClick={() => {
                 if (isWideView) {
-                  // Exit wide view
                   setIsWideView(false);
                   setIsPagesDrawerOpen(false);
                   setIsSidebarCollapsed(false);
                 } else if (isSidebarCollapsed) {
-                  // Restore sidebar
                   setIsSidebarCollapsed(false);
                 } else {
-                  // Enter wide view (hide sidebar, expand preview)
                   setIsWideView(true);
                   setIsSidebarCollapsed(true);
                 }
               }}
-              className={`p-1.5 rounded text-xs transition-colors cursor-pointer border flex items-center gap-1 font-mono text-[11px] ${
-                isWideView
+              className={`hidden lg:flex p-1.5 rounded text-xs transition-colors cursor-pointer border items-center gap-1 font-mono text-[11px] ${isWideView
                   ? 'border-foreground/40 bg-foreground text-background font-semibold'
                   : isSidebarCollapsed
-                  ? 'border-foreground/30 bg-muted text-foreground'
-                  : 'border-border text-muted-foreground hover:text-foreground'
-              }`}
+                    ? 'border-foreground/30 bg-muted text-foreground'
+                    : 'border-border text-muted-foreground hover:text-foreground'
+                }`}
               title={isWideView ? 'Exit wide view, restore sidebar' : isSidebarCollapsed ? 'Show sidebar' : 'Full width preview'}
             >
               {isWideView ? (
                 <>
                   <Minimize2 className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Normal</span>
+                  <span>Normal</span>
                 </>
               ) : isSidebarCollapsed ? (
                 <>
                   <PanelRightOpen className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Sidebar</span>
+                  <span>Sidebar</span>
                 </>
               ) : (
                 <>
                   <Maximize2 className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Wide View</span>
+                  <span>Wide View</span>
                 </>
               )}
             </button>
 
-            {/* In Wide View: Drawer trigger for Pages & Dashboard */}
+            {/* In Wide View: Drawer trigger for Pages & Dashboard (desktop only) */}
             {isWideView && (
               <button
                 type="button"
                 onClick={() => setIsPagesDrawerOpen(!isPagesDrawerOpen)}
-                className={`p-1.5 rounded text-xs border transition-colors cursor-pointer flex items-center gap-1 font-mono text-[11px] ${
-                  isPagesDrawerOpen
+                className={`hidden lg:flex p-1.5 rounded text-xs border transition-colors cursor-pointer items-center gap-1 font-mono text-[11px] ${isPagesDrawerOpen
                     ? 'border-foreground/30 bg-muted text-foreground'
                     : 'border-border bg-card text-muted-foreground hover:text-foreground'
-                }`}
+                  }`}
                 title="Toggle Pages & Dashboard Drawer"
               >
                 <PanelRightOpen className="w-3.5 h-3.5" />
@@ -624,10 +644,23 @@ export function PreviewTab({
               </button>
             )}
 
+            {/* Mobile Drawer Trigger (< lg) - Explorer button */}
+            <button
+              type="button"
+              onClick={() => setIsMobileDrawerOpen(true)}
+              className="lg:hidden p-1.5 px-2.5 rounded-md border border-border bg-card hover:bg-muted text-foreground transition-colors cursor-pointer flex items-center gap-1.5 font-mono text-[11px] shadow-2xs"
+              title="Open Project Explorer & Dashboard"
+            >
+              <PanelRightOpen className="w-3.5 h-3.5 text-foreground" />
+              <span className="capitalize">{sidebarTab}</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            </button>
+
+            {/* External Link button (desktop) */}
             <button
               type="button"
               onClick={handleOpenExternally}
-              className="p-1.5 rounded text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              className="hidden sm:inline-flex p-1.5 rounded text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
               title="Open standalone preview in new tab"
             >
               <ExternalLink className="w-3.5 h-3.5" />
@@ -780,11 +813,10 @@ export function PreviewTab({
                         key={i}
                         type="button"
                         onClick={() => onChangePreviewPath(dashPage)}
-                        className={`px-2.5 py-0.5 rounded text-[11px] font-mono border transition-colors cursor-pointer ${
-                          isActive
+                        className={`px-2.5 py-0.5 rounded text-[11px] font-mono border transition-colors cursor-pointer ${isActive
                             ? 'border-emerald-500 bg-emerald-500/20 text-emerald-300 font-bold shadow-xs'
                             : 'border-border/60 bg-card text-muted-foreground hover:text-foreground'
-                        }`}
+                          }`}
                       >
                         {name}
                       </button>
@@ -807,9 +839,8 @@ export function PreviewTab({
 
           {viewMode === 'preview' ? (
             <div
-              className={`w-full h-full flex-1 min-h-0 flex justify-center items-center bg-muted/20 ${
-                viewport === 'desktop' ? 'p-0 overflow-hidden' : 'p-3 sm:p-4 overflow-auto'
-              }`}
+              className={`w-full h-full flex-1 min-h-0 flex justify-center items-center bg-muted/20 ${viewport === 'desktop' ? 'p-0 overflow-hidden' : 'p-3 sm:p-4 overflow-auto'
+                }`}
             >
               {viewport === 'desktop' ? (
                 /* Desktop Monitor View: 100% full responsive matching remaining viewport */
@@ -957,19 +988,48 @@ export function PreviewTab({
         </div>
       </div>
 
-      {/* Right slim sidebar: 10-15% narrower horizontally with seamless in-place tabs */}
-      {!isWideView && !isSidebarCollapsed && (
-        <div className="w-full lg:w-[275px] xl:w-[295px] 2xl:w-[315px] shrink-0 flex flex-col space-y-2 h-full min-h-0 overflow-hidden">
+      {/* Right slim sidebar: Fixed side column on lg+, Slide-over Drawer on mobile */}
+      {isMobileDrawerOpen && (
+        <div
+          onClick={() => setIsMobileDrawerOpen(false)}
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs lg:hidden animate-in fade-in"
+        />
+      )}
+
+      {((!isWideView && !isSidebarCollapsed) || isMobileDrawerOpen) && (
+        <div
+          className={`
+            ${isMobileDrawerOpen
+              ? 'fixed inset-y-0 right-0 z-50 w-full sm:w-[380px] bg-card p-3 shadow-2xl flex flex-col space-y-2 border-l border-border animate-in slide-in-from-right duration-200'
+              : 'hidden lg:flex lg:w-[275px] xl:w-[295px] 2xl:w-[315px] shrink-0 flex-col space-y-2 h-full min-h-0 overflow-hidden'}
+          `}
+        >
+          {/* Mobile Drawer Header with Close Button */}
+          {isMobileDrawerOpen && (
+            <div className="flex items-center justify-between pb-2 border-b border-border/80 lg:hidden shrink-0">
+              <span className="text-xs font-mono font-bold text-foreground uppercase tracking-wider">
+                Project Explorer
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsMobileDrawerOpen(false)}
+                className="p-1 rounded text-muted-foreground hover:text-foreground cursor-pointer"
+                title="Close Explorer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
           {/* View Switcher: Dashboard vs Pages vs Assets vs Files */}
           <div className="flex items-center bg-card border border-border p-1 rounded-xl shadow-xs shrink-0 gap-0.5">
             <button
               type="button"
               onClick={() => setSidebarTab('dashboard')}
-              className={`flex-1 py-1.5 px-1 rounded-lg text-[10px] sm:text-[11px] font-mono transition-all cursor-pointer text-center truncate ${
-                sidebarTab === 'dashboard'
+              className={`flex-1 py-1.5 px-1 rounded-lg text-[10px] sm:text-[11px] font-mono transition-all cursor-pointer text-center truncate ${sidebarTab === 'dashboard'
                   ? 'bg-foreground text-background font-bold shadow-xs'
                   : 'text-muted-foreground hover:text-foreground'
-              }`}
+                }`}
               title="Dashboard"
             >
               Dash
@@ -977,11 +1037,10 @@ export function PreviewTab({
             <button
               type="button"
               onClick={() => setSidebarTab('pages')}
-              className={`flex-1 py-1.5 px-1 rounded-lg text-[10px] sm:text-[11px] font-mono transition-all cursor-pointer text-center truncate ${
-                sidebarTab === 'pages'
+              className={`flex-1 py-1.5 px-1 rounded-lg text-[10px] sm:text-[11px] font-mono transition-all cursor-pointer text-center truncate ${sidebarTab === 'pages'
                   ? 'bg-foreground text-background font-bold shadow-xs'
                   : 'text-muted-foreground hover:text-foreground'
-              }`}
+                }`}
               title={`Captured Pages (${htmlPages.length})`}
             >
               Pages ({htmlPages.length})
@@ -989,11 +1048,10 @@ export function PreviewTab({
             <button
               type="button"
               onClick={() => setSidebarTab('assets')}
-              className={`flex-1 py-1.5 px-1 rounded-lg text-[10px] sm:text-[11px] font-mono transition-all cursor-pointer text-center truncate ${
-                sidebarTab === 'assets'
+              className={`flex-1 py-1.5 px-1 rounded-lg text-[10px] sm:text-[11px] font-mono transition-all cursor-pointer text-center truncate ${sidebarTab === 'assets'
                   ? 'bg-foreground text-background font-bold shadow-xs'
                   : 'text-muted-foreground hover:text-foreground'
-              }`}
+                }`}
               title={`Captured Assets (${assetsCount || assetsList.length})`}
             >
               Assets
@@ -1001,11 +1059,10 @@ export function PreviewTab({
             <button
               type="button"
               onClick={() => setSidebarTab('files')}
-              className={`flex-1 py-1.5 px-1 rounded-lg text-[10px] sm:text-[11px] font-mono transition-all cursor-pointer text-center truncate ${
-                sidebarTab === 'files'
+              className={`flex-1 py-1.5 px-1 rounded-lg text-[10px] sm:text-[11px] font-mono transition-all cursor-pointer text-center truncate ${sidebarTab === 'files'
                   ? 'bg-foreground text-background font-bold shadow-xs'
                   : 'text-muted-foreground hover:text-foreground'
-              }`}
+                }`}
               title="Files Directory"
             >
               Files
@@ -1030,6 +1087,7 @@ export function PreviewTab({
                 crawlLogs={crawlLogs}
                 onBrowseFiles={handleBrowseFiles}
                 onBrowseAssets={handleBrowseAssets}
+                onBrowsePages={() => setSidebarTab('pages')}
                 onOpenLogs={onOpenLogs}
                 onDownloadZip={onDownloadZip}
                 isDownloadingZip={isDownloadingZip}
@@ -1062,11 +1120,10 @@ export function PreviewTab({
                       key={cat.id}
                       type="button"
                       onClick={() => setPageFilter(cat.id as any)}
-                      className={`px-2 py-1 rounded text-[10px] font-mono transition-all cursor-pointer shrink-0 ${
-                        pageFilter === cat.id
+                      className={`px-2 py-1 rounded text-[10px] font-mono transition-all cursor-pointer shrink-0 ${pageFilter === cat.id
                           ? 'bg-foreground text-background font-bold shadow-xs'
                           : 'bg-muted/60 text-muted-foreground hover:text-foreground'
-                      }`}
+                        }`}
                     >
                       {cat.label}
                     </button>
@@ -1099,12 +1156,14 @@ export function PreviewTab({
                         <button
                           key={idx}
                           type="button"
-                          onClick={() => onChangePreviewPath(page)}
-                          className={`w-full text-left p-2 rounded-md transition-colors text-xs font-mono flex items-center justify-between gap-2 cursor-pointer ${
-                            isSelected
+                          onClick={() => {
+                            onChangePreviewPath(page);
+                            setIsMobileDrawerOpen(false);
+                          }}
+                          className={`w-full text-left p-2 rounded-md transition-colors text-xs font-mono flex items-center justify-between gap-2 cursor-pointer ${isSelected
                               ? 'bg-foreground text-background font-semibold'
                               : 'hover:bg-muted text-muted-foreground hover:text-foreground'
-                          }`}
+                            }`}
                         >
                           <div className="flex items-center gap-1.5 truncate">
                             <FileCode className="w-3.5 h-3.5 shrink-0" />
@@ -1142,6 +1201,7 @@ export function PreviewTab({
                   {[
                     { id: 'all', label: 'All' },
                     { id: 'image', label: 'Images' },
+                    { id: 'media', label: 'Media' },
                     { id: 'css', label: 'CSS' },
                     { id: 'js', label: 'JS' },
                     { id: 'font', label: 'Fonts' },
@@ -1150,11 +1210,10 @@ export function PreviewTab({
                       key={cat.id}
                       type="button"
                       onClick={() => setAssetFilter(cat.id as any)}
-                      className={`px-2 py-1 rounded text-[10px] font-mono transition-all cursor-pointer shrink-0 ${
-                        assetFilter === cat.id
+                      className={`px-2 py-1 rounded text-[10px] font-mono transition-all cursor-pointer shrink-0 ${assetFilter === cat.id
                           ? 'bg-foreground text-background font-bold shadow-xs'
                           : 'bg-muted/60 text-muted-foreground hover:text-foreground'
-                      }`}
+                        }`}
                     >
                       {cat.label}
                     </button>
@@ -1176,7 +1235,13 @@ export function PreviewTab({
                 {/* Assets list */}
                 <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-1">
                   {assetsList.filter((a) => {
-                    if (assetFilter !== 'all' && a.type !== assetFilter) return false;
+                    if (assetFilter === 'image') {
+                      if (a.type !== 'image' && a.type !== 'svg') return false;
+                    } else if (assetFilter === 'media') {
+                      if (a.type !== 'image' && a.type !== 'svg' && a.type !== 'video' && a.type !== 'audio') return false;
+                    } else if (assetFilter !== 'all' && a.type !== assetFilter) {
+                      return false;
+                    }
                     if (assetSearchQuery) {
                       const q = assetSearchQuery.toLowerCase();
                       return a.name.toLowerCase().includes(q) || a.path.toLowerCase().includes(q);
@@ -1189,7 +1254,13 @@ export function PreviewTab({
                   ) : (
                     assetsList
                       .filter((a) => {
-                        if (assetFilter !== 'all' && a.type !== assetFilter) return false;
+                        if (assetFilter === 'image') {
+                          if (a.type !== 'image' && a.type !== 'svg') return false;
+                        } else if (assetFilter === 'media') {
+                          if (a.type !== 'image' && a.type !== 'svg' && a.type !== 'video' && a.type !== 'audio') return false;
+                        } else if (assetFilter !== 'all' && a.type !== assetFilter) {
+                          return false;
+                        }
                         if (assetSearchQuery) {
                           const q = assetSearchQuery.toLowerCase();
                           return a.name.toLowerCase().includes(q) || a.path.toLowerCase().includes(q);
@@ -1204,22 +1275,31 @@ export function PreviewTab({
                             key={idx}
                             onClick={() => {
                               if (asset.path) {
-                                onChangePreviewPath(asset.path.replace(/^\//, ''));
+                                const clean = asset.path.replace(/^\//, '');
+                                onChangePreviewPath(clean);
+                                // Code files (CSS, JS, JSON) switch to code editor view
+                                if (
+                                  ['css', 'js', 'document'].includes(asset.type) ||
+                                  clean.endsWith('.css') ||
+                                  clean.endsWith('.js') ||
+                                  clean.endsWith('.json')
+                                ) {
+                                  setViewMode('code');
+                                }
                               }
                             }}
-                            className={`p-2 rounded-lg border transition-all text-xs font-mono flex items-center justify-between gap-2 cursor-pointer ${
-                              isSelected
+                            className={`p-2 rounded-lg border transition-all text-xs font-mono flex items-center justify-between gap-2 cursor-pointer ${isSelected
                                 ? 'bg-muted/80 border-foreground/40 text-foreground font-semibold'
                                 : 'bg-muted/20 border-border/60 hover:bg-muted/60 text-muted-foreground hover:text-foreground'
-                            }`}
+                              }`}
                           >
                             <div className="flex items-center gap-2 truncate min-w-0">
-                              {asset.type === 'image' && asset.previewUrl ? (
-                                <div className="w-5 h-5 rounded bg-muted overflow-hidden shrink-0 border border-border">
+                              {(asset.type === 'image' || asset.type === 'svg') && asset.previewUrl ? (
+                                <div className="w-5 h-5 rounded bg-muted overflow-hidden shrink-0 border border-border flex items-center justify-center p-0.5">
                                   <img
                                     src={asset.previewUrl}
                                     alt={asset.name}
-                                    className="w-full h-full object-cover"
+                                    className="w-full h-full object-contain"
                                   />
                                 </div>
                               ) : (
@@ -1331,11 +1411,10 @@ export function PreviewTab({
                           key={idx}
                           type="button"
                           onClick={() => onChangePreviewPath(file.path)}
-                          className={`w-full text-left p-1.5 rounded-md transition-colors text-xs font-mono flex items-center justify-between gap-1.5 cursor-pointer ${
-                            isSelected
+                          className={`w-full text-left p-1.5 rounded-md transition-colors text-xs font-mono flex items-center justify-between gap-1.5 cursor-pointer ${isSelected
                               ? 'bg-foreground text-background font-semibold'
                               : 'hover:bg-muted text-muted-foreground hover:text-foreground'
-                          }`}
+                            }`}
                         >
                           <div className="flex items-center gap-1.5 truncate">
                             {file.isHtml ? (
@@ -1392,11 +1471,10 @@ export function PreviewTab({
                 key={cat.id}
                 type="button"
                 onClick={() => setPageFilter(cat.id as any)}
-                className={`px-2 py-1 rounded text-[10px] font-mono transition-all cursor-pointer shrink-0 ${
-                  pageFilter === cat.id
+                className={`px-2 py-1 rounded text-[10px] font-mono transition-all cursor-pointer shrink-0 ${pageFilter === cat.id
                     ? 'bg-foreground text-background font-bold shadow-xs'
                     : 'bg-muted/60 text-muted-foreground hover:text-foreground'
-                }`}
+                  }`}
               >
                 {cat.label}
               </button>
@@ -1425,11 +1503,10 @@ export function PreviewTab({
                     onChangePreviewPath(page);
                     setIsPagesDrawerOpen(false);
                   }}
-                  className={`w-full text-left p-2 rounded-md transition-colors text-xs font-mono flex items-center justify-between gap-2 cursor-pointer ${
-                    isSelected
+                  className={`w-full text-left p-2 rounded-md transition-colors text-xs font-mono flex items-center justify-between gap-2 cursor-pointer ${isSelected
                       ? 'bg-foreground text-background font-semibold'
                       : 'hover:bg-muted text-muted-foreground hover:text-foreground'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center gap-1.5 truncate">
                     <FileCode className="w-3.5 h-3.5 shrink-0" />

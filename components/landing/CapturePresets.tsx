@@ -57,8 +57,8 @@ export function CapturePresets({
   onConfigureCustom,
 }: CapturePresetsProps) {
   return (
-    <div className="w-full max-w-4xl mx-auto mt-8">
-      <div className="flex items-center justify-between mb-3 px-1">
+    <div className="w-full max-w-4xl mx-auto mt-6 sm:mt-8">
+      <div className="flex items-center justify-between mb-2.5 sm:mb-3 px-1">
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider font-mono">
           Capture Scope
         </span>
@@ -73,7 +73,7 @@ export function CapturePresets({
         )}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
         {PRESETS.map((item) => {
           const isSelected = selectedPreset === item.id;
           const Icon = item.icon;
@@ -99,28 +99,34 @@ export function CapturePresets({
                   }
                 }
               }}
-              className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                isSelected
-                  ? 'border-foreground bg-muted/60 text-foreground shadow-xs ring-1 ring-foreground/20'
-                  : 'border-border bg-card/60 hover:bg-card hover:border-border text-muted-foreground hover:text-foreground'
-              }`}
+              className={`p-3.5 sm:p-4 rounded-xl border text-left cursor-pointer flex flex-col justify-between card-hover-effect group ${isSelected
+                  ? 'border-foreground bg-muted/80 text-foreground shadow-sm ring-1 ring-foreground/40'
+                  : 'border-border/80 bg-card/60 hover:bg-card hover:border-foreground/30 text-muted-foreground hover:text-foreground'
+                }`}
             >
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <Icon className="w-4 h-4 text-foreground" />
-                  {isSelected && <Check className="w-3.5 h-3.5 text-foreground" />}
+                  <div className="flex items-center gap-2">
+                    <div className={`p-1.5 rounded-lg border transition-colors ${isSelected
+                        ? 'border-foreground/40 bg-foreground text-background'
+                        : 'border-border/60 bg-muted/60 text-foreground group-hover:border-foreground/40'
+                      }`}>
+                      <Icon className="w-3.5 h-3.5 shrink-0 group-hover:scale-110 transition-transform duration-200" />
+                    </div>
+                    <span className="text-xs sm:text-sm font-bold font-display tracking-tight text-foreground">
+                      {item.title}
+                    </span>
+                  </div>
+                  {isSelected && <Check className="w-3.5 h-3.5 text-foreground shrink-0" />}
                 </div>
 
-                <div className="text-xs font-semibold text-foreground mb-1">
-                  {item.title}
-                </div>
-                <p className="text-[11px] text-muted-foreground leading-normal mb-3">
+                <p className="text-[11px] font-sans text-muted-foreground leading-relaxed mb-3">
                   {item.description}
                 </p>
               </div>
 
-              <div className="text-[10px] font-mono text-muted-foreground pt-2 border-t border-border/50">
-                {item.specs}
+              <div className="text-[10px] font-mono text-muted-foreground/80 pt-2 border-t border-border/50 flex items-center justify-between">
+                <span>{item.specs}</span>
               </div>
             </SpotlightCard>
           );

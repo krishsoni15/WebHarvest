@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -12,7 +12,29 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
+
+const fontDisplay = Plus_Jakarta_Sans({
+  variable: "--font-display",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+});
+
+const fontCode = JetBrains_Mono({
+  variable: "--font-code",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+});
+
 import { FAVICON_DATA_URI } from "@/lib/logoData";
+import { GlobalClickSpark } from "@/components/reactbits/GlobalClickSpark";
+import { ScrollToTop } from "@/components/shared/scroll-to-top";
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+};
 
 export const metadata: Metadata = {
   title: "WebHarvest V3 — Intelligent Website Reconstruction Engine",
@@ -35,7 +57,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
+      className={`${fontDisplay.variable} ${geistSans.variable} ${fontCode.variable} ${geistMono.variable} h-full antialiased dark`}
       suppressHydrationWarning
     >
       <head>
@@ -43,25 +65,11 @@ export default function RootLayout({
         <link rel="icon" href="/favicon.ico" sizes="any" />
         <link rel="shortcut icon" href="/favicon.ico" />
         <link rel="apple-touch-icon" href="/apple-icon.png" />
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              try {
-                const theme = localStorage.getItem('webharvest_theme');
-                if (theme === 'light') {
-                  document.documentElement.classList.remove('dark');
-                  document.documentElement.classList.add('light');
-                } else {
-                  document.documentElement.classList.add('dark');
-                  document.documentElement.classList.remove('light');
-                }
-              } catch (e) {}
-            `,
-          }}
-        />
       </head>
       <body className="min-h-full flex flex-col bg-background text-foreground selection:bg-primary/20 selection:text-primary transition-colors duration-200" suppressHydrationWarning>
+        <GlobalClickSpark />
         {children}
+        <ScrollToTop />
       </body>
     </html>
   );

@@ -140,19 +140,22 @@ export function discoverHTML(html: string, baseURL: string): HTMLDiscoveryResult
   // 1. Page Title & Meta tags
   const title = $('title').first().text().trim() || undefined;
   $('meta').each((_, el) => {
-    const name = $(el).attr('name') || $(el).attr('property');
+    const rawName = $(el).attr('name') || $(el).attr('property') || '';
+    const name = rawName.toLowerCase();
     const content = $(el).attr('content');
     if (name && content) {
       metaTags[name] = content;
-      // Social/OG Images
-      if (name.includes('image') || name === 'og:image' || name === 'twitter:image') {
+      // Social/OG Images - only match genuine image resource URLs, exclude dimensions (width, height, type)
+      const isImageMeta =
+        ['og:image', 'og:image:url', 'og:image:secure_url', 'twitter:image', 'twitter:image:src', 'image'].includes(name);
+      if (isImageMeta && !/^\d+$/.test(content.trim()) && !/^image\//i.test(content.trim())) {
         const resolved = resolveUrl(content, baseURL);
         if (resolved) {
           addResource({
             rawUrl: content,
             resolvedUrl: resolved,
             type: 'image',
-            attribute: name,
+            attribute: rawName,
             tag: 'meta',
           });
         }
@@ -165,7 +168,45 @@ export function discoverHTML(html: string, baseURL: string): HTMLDiscoveryResult
     const href = $(el).attr('href');
     if (!href) return;
     const resolved = resolveUrl(href, baseURL);
-    if (resolved) {
+    if (!resolved) return;
+
+    const lower = resolved.toLowerCase();
+    const isImage =
+      /\.(png|jpe?g|gif|webp|avif|svg|ico|bmp)(\?.*)?$/i.test(resolved) ||
+      lower.includes('/_next/image') ||
+      lower.includes('/opengraph-image') ||
+      lower.includes('/twitter-image') ||
+      lower.includes('/apple-icon') ||
+      (lower.includes('/image?') && (lower.includes('url=') || lower.includes('src=')));
+
+    const isDocument = /\.(pdf|docx?|xlsx?|csv|zip|tar|gz)(\?.*)?$/i.test(resolved);
+    const isMedia = /\.(mp4|webm|mp3|wav|ogg)(\?.*)?$/i.test(resolved);
+
+    if (isImage) {
+      addResource({
+        rawUrl: href,
+        resolvedUrl: resolved,
+        type: 'image',
+        attribute: 'href',
+        tag: 'a',
+      });
+    } else if (isDocument) {
+      addResource({
+        rawUrl: href,
+        resolvedUrl: resolved,
+        type: 'document',
+        attribute: 'href',
+        tag: 'a',
+      });
+    } else if (isMedia) {
+      addResource({
+        rawUrl: href,
+        resolvedUrl: resolved,
+        type: 'video',
+        attribute: 'href',
+        tag: 'a',
+      });
+    } else {
       addLink({
         rawUrl: href,
         resolvedUrl: resolved,
@@ -175,28 +216,61 @@ export function discoverHTML(html: string, baseURL: string): HTMLDiscoveryResult
     }
   });
 
-  // 3. Stylesheets & Preloads: <link>
+  // 3. Stylesheets, Icons & Preloaded Assets: <link>
   $('link[href]').each((_, el) => {
     const href = $(el).attr('href');
-    const rel = ($(el).attr('rel') || '').toLowerCase();
+    const rel = ($(el).attr('rel') || '').toLowerCase().trim();
     if (!href) return;
+
+    // Filter out non-resource browser hints and metadata links
+    const nonResourceRels = [
+      'dns-prefetch',
+      'preconnect',
+      'prefetch',
+      'prerender',
+      'profile',
+      'pingback',
+      'canonical',
+      'shortlink',
+      'alternate',
+      'search',
+      'help',
+      'license',
+      'author',
+      'prev',
+      'next',
+    ];
+    const isStylesheet = rel.includes('stylesheet');
+    const isIcon = rel.includes('icon') || rel.includes('apple-touch-icon');
+    const isManifest = rel.includes('manifest');
+    const isPreload = rel.includes('preload') && Boolean($(el).attr('as'));
+
+    // If it's a non-resource link and not an explicit stylesheet or icon, ignore it completely
+    if (nonResourceRels.some((nr) => rel.includes(nr)) && !isStylesheet && !isIcon) {
+      return;
+    }
+
+    if (!isStylesheet && !isIcon && !isManifest && !isPreload) {
+      return;
+    }
 
     const resolved = resolveUrl(href, baseURL);
     if (!resolved) return;
 
     let type: DiscoveredResource['type'] = 'other';
-    if (rel.includes('stylesheet')) {
+    if (isStylesheet) {
       type = 'stylesheet';
-    } else if (rel.includes('icon') || rel.includes('apple-touch-icon')) {
+    } else if (isIcon) {
       type = 'image';
-    } else if (rel.includes('manifest')) {
+    } else if (isManifest) {
       type = 'manifest';
-    } else if (rel.includes('preload') || rel.includes('prefetch')) {
-      const as = $(el).attr('as') || '';
+    } else if (isPreload) {
+      const as = ($(el).attr('as') || '').toLowerCase();
       if (as === 'style') type = 'stylesheet';
       else if (as === 'script') type = 'script';
       else if (as === 'font') type = 'font';
       else if (as === 'image') type = 'image';
+      else type = 'other';
     }
 
     addResource({
@@ -228,7 +302,7 @@ export function discoverHTML(html: string, baseURL: string): HTMLDiscoveryResult
     }
   });
 
-  // 5. Images: <img src>, <img srcset>
+  // 5. Images: <img src>, <img srcset>, lazyload data-src
   $('img').each((_, el) => {
     const src = $(el).attr('src');
     if (src) {
@@ -244,9 +318,28 @@ export function discoverHTML(html: string, baseURL: string): HTMLDiscoveryResult
       }
     }
 
+    const dataSrc = $(el).attr('data-src') || $(el).attr('data-lazy-src') || $(el).attr('data-original');
+    if (dataSrc) {
+      const resolved = resolveUrl(dataSrc, baseURL);
+      if (resolved) {
+        addResource({
+          rawUrl: dataSrc,
+          resolvedUrl: resolved,
+          type: 'image',
+          attribute: 'data-src',
+          tag: 'img',
+        });
+      }
+    }
+
     const srcset = $(el).attr('srcset');
     if (srcset) {
       parseSrcset(srcset, baseURL).forEach(addResource);
+    }
+
+    const dataSrcset = $(el).attr('data-srcset');
+    if (dataSrcset) {
+      parseSrcset(dataSrcset, baseURL).forEach(addResource);
     }
   });
 

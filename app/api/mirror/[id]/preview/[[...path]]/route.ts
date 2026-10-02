@@ -105,6 +105,29 @@ export async function GET(
     let pathFound = resolvedFilePath !== null;
     let filePath = resolvedFilePath || primaryPath;
 
+    // Detect if resolved index.html is a Google 404 or corrupted error page
+    if (pathFound && (segments.length === 0 || segments.join('/') === 'index.html')) {
+      try {
+        const textSample = fs.readFileSync(filePath, 'utf-8').slice(0, 1500);
+        if (
+          textSample.includes('<title>Error 404') ||
+          textSample.includes('404. That’s an error') ||
+          textSample.includes('robot.png') ||
+          textSample.includes('af-error-container')
+        ) {
+          pathFound = false;
+          // Unlink the corrupted 404 error page so it cannot be mistakenly served
+          try {
+            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            const rootTarget = path.join(targetDir, 'index.html');
+            if (fs.existsSync(rootTarget)) fs.unlinkSync(rootTarget);
+            const rootBase = path.join(baseDir, 'index.html');
+            if (fs.existsSync(rootBase)) fs.unlinkSync(rootBase);
+          } catch {}
+        }
+      } catch {}
+    }
+
     // Fallback 1: Check manifest.json for initial entry page if index.html was requested but not found
     if (!pathFound && (segments.length === 0 || segments.join('/') === 'index.html')) {
       const manifestPath = path.join(baseDir, 'manifest.json');
@@ -113,16 +136,23 @@ export async function GET(
           const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
           const firstPage = manifest.resources?.find((r: any) =>
             r.localPath && (r.localPath.endsWith('.html') || r.localPath.endsWith('.htm')) &&
+            !r.localPath.includes('error') &&
             fs.existsSync(path.join(baseDir, r.localPath))
           );
           if (firstPage) {
-            filePath = path.join(baseDir, firstPage.localPath);
-            pathFound = true;
+            const candidate = path.join(baseDir, firstPage.localPath);
+            try {
+              const sample = fs.readFileSync(candidate, 'utf-8').slice(0, 1500);
+              if (!sample.includes('404. That’s an error') && !sample.includes('af-error-container')) {
+                filePath = candidate;
+                pathFound = true;
+              }
+            } catch {}
           }
         } catch {}
       }
 
-      // Check pages/ directory for any html file
+      // Check pages/ directory for any valid html file
       if (!pathFound) {
         const pagesDir = path.join(baseDir, 'pages');
         if (fs.existsSync(pagesDir)) {
@@ -134,7 +164,7 @@ export async function GET(
         }
       }
 
-      // Check entire baseDir for any html file
+      // Check entire baseDir for any valid html file
       if (!pathFound) {
         const found = findFirstHtmlRecursive(baseDir);
         if (found) {
@@ -203,11 +233,75 @@ export async function GET(
       }
     }
 
+    // Fallback 4b: Next.js Image Optimization route resolution in Preview
+    if (!pathFound && (segments.join('/').includes('_next/image') || segments[segments.length - 1] === 'image' || segments[segments.length - 1] === 'opengraph-image' || segments[segments.length - 1] === 'twitter-image')) {
+      const searchParams = req.nextUrl.searchParams;
+      const innerUrl = searchParams.get('url') || searchParams.get('src') || searchParams.get('img');
+      if (innerUrl) {
+        try {
+          const decoded = decodeURIComponent(innerUrl);
+          const innerBase = path.basename(decoded.split('?')[0]);
+          if (innerBase) {
+            const baseWithoutExt = innerBase.replace(/\.[^.]+$/, '');
+            const width = searchParams.get('w') || searchParams.get('width') || '';
+            const candidates = [
+              width ? `${baseWithoutExt}_w${width}.png` : '',
+              width ? `${baseWithoutExt}_w${width}.webp` : '',
+              innerBase,
+              `${baseWithoutExt}.png`,
+              `${baseWithoutExt}.webp`,
+              `${baseWithoutExt}.jpg`,
+              `${baseWithoutExt}.svg`,
+            ].filter(Boolean);
+
+            for (const cand of candidates) {
+              const found = findFileRecursive(baseDir, cand);
+              if (found) {
+                filePath = found;
+                pathFound = true;
+                break;
+              }
+            }
+
+            if (!pathFound) {
+              const assetsImgDir = path.join(baseDir, 'assets', 'images');
+              if (fs.existsSync(assetsImgDir)) {
+                const files = fs.readdirSync(assetsImgDir);
+                const matched = files.find(f => f.toLowerCase().startsWith(baseWithoutExt.toLowerCase()));
+                if (matched) {
+                  filePath = path.join(assetsImgDir, matched);
+                  pathFound = true;
+                }
+              }
+            }
+          }
+        } catch {}
+      } else {
+        // Dynamic routes without inner url (e.g. /opengraph-image?46961ab24f1bc43f)
+        const assetsImgDir = path.join(baseDir, 'assets', 'images');
+        if (fs.existsSync(assetsImgDir)) {
+          const routeName = segments[segments.length - 1];
+          const files = fs.readdirSync(assetsImgDir);
+          const matched = files.find(f => f.toLowerCase().startsWith(routeName.toLowerCase()));
+          if (matched) {
+            filePath = path.join(assetsImgDir, matched);
+            pathFound = true;
+          }
+        }
+      }
+    }
+
     // Fallback 5: Single Page Application (SPA) routing fallback
     // If an HTML navigation route is requested and no specific page exists on disk, serve the main entry html
     if (!pathFound) {
       const requestedExt = path.extname(segments[segments.length - 1] || '');
-      const isRouteRequest = !requestedExt || requestedExt === '.html' || requestedExt === '.htm';
+      const isImageRoute =
+        segments.join('/').includes('_next/image') ||
+        segments[segments.length - 1] === 'image' ||
+        segments[segments.length - 1] === 'opengraph-image' ||
+        segments[segments.length - 1] === 'twitter-image';
+
+      const isRouteRequest = (!requestedExt || requestedExt === '.html' || requestedExt === '.htm') && !isImageRoute;
       if (isRouteRequest) {
         const rootIndex = path.join(targetDir, 'index.html');
         const baseIndex = path.join(baseDir, 'index.html');
@@ -236,8 +330,49 @@ export async function GET(
     }
 
     if (!pathFound || !fs.existsSync(filePath)) {
-      // If crawling is currently in progress, return a live stream holding page instead of 404
-      if (job.status === 'downloading') {
+      // Live entry page capture on-demand if index.html is requested before crawler finishes saving it
+      if (segments.length === 0 || segments.join('/') === 'index.html') {
+        try {
+          const entryUrls = [
+            job.url,
+            `https://${job.hostname}/`,
+            `https://www.${job.hostname.replace(/^www\./, '')}/`,
+          ].filter(Boolean);
+
+          for (const entryUrl of entryUrls) {
+            try {
+              const entryRes = await fetch(entryUrl as string, {
+                headers: {
+                  'User-Agent':
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+                  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                },
+                redirect: 'follow',
+              });
+              if (entryRes.ok) {
+                const htmlText = await entryRes.text();
+                const isError =
+                  htmlText.includes('<title>Error 404') ||
+                  htmlText.includes('404. That’s an error') ||
+                  htmlText.includes('af-error-container');
+                if (!isError && htmlText.length > 500) {
+                  const rootIndex = path.join(targetDir, 'index.html');
+                  try {
+                    fs.mkdirSync(targetDir, { recursive: true });
+                    fs.writeFileSync(rootIndex, htmlText, 'utf-8');
+                  } catch {}
+                  filePath = rootIndex;
+                  pathFound = true;
+                  break;
+                }
+              }
+            } catch {}
+          }
+        } catch {}
+      }
+
+      // If crawling is currently in progress and still no file, return a live stream holding page instead of 404
+      if (!pathFound && job.status === 'downloading') {
         const liveHoldingHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -361,13 +496,33 @@ export async function GET(
     if (mimeType.startsWith('text/html') || mimeType.startsWith('text/css')) {
       let content = fileBuffer.toString('utf-8');
 
-      if (job.status === 'completed') {
+      // Adapt absolute domain URLs to preview route
+      if (job.hostname && job.hostname.includes('.')) {
         const cleanHostname = job.hostname.toLowerCase().replace('www.', '');
         const domainRegex = new RegExp(`(?:https?:)?//(?:www\\.)?${escapeRegExp(cleanHostname)}\\/?`, 'gi');
         content = content.replace(domainRegex, `/api/mirror/${id}/preview/`);
       }
 
       if (mimeType.startsWith('text/html')) {
+        // Adapt root-relative Next.js chunks, Vite, and assets to preview route
+        content = content.replace(/(href|src|srcset)=["']\/_next\//gi, `$1="/api/mirror/${id}/preview/_next/`);
+        content = content.replace(/url\((['"]?)\/_next\//gi, `url($1/api/mirror/${id}/preview/_next/`);
+        content = content.replace(/(href|src|srcset)=["']\/assets\//gi, `$1="/api/mirror/${id}/preview/assets/`);
+        content = content.replace(/url\((['"]?)\/assets\//gi, `url($1/api/mirror/${id}/preview/assets/`);
+        
+        if (!content.includes('<base')) {
+          content = content.replace(/<head>/i, `<head><base href="/api/mirror/${id}/preview/">`);
+        }
+
+        // Protective stylesheet and layout stabilization
+        const protectiveStyle = `
+          <style>
+            img, video { max-width: 100%; height: auto; }
+            svg:not([width]) { max-width: 100%; }
+          </style>
+        `;
+        content = content.replace(/<head>/i, `<head>${protectiveStyle}`);
+
         // Inject script to override IntersectionObserver and preserve offline hydration
         const observerOverrideScript = `
           <script>
@@ -586,6 +741,17 @@ function findFirstHtmlRecursive(dir: string): string | null {
         const found = findFirstHtmlRecursive(full);
         if (found) return found;
       } else if (item.endsWith('.html') || item.endsWith('.htm')) {
+        try {
+          const sample = fs.readFileSync(full, 'utf-8').slice(0, 1500);
+          if (
+            sample.includes('<title>Error 404') ||
+            sample.includes('404. That’s an error') ||
+            sample.includes('af-error-container') ||
+            sample.includes('robot.png')
+          ) {
+            continue;
+          }
+        } catch {}
         return full;
       }
     }

@@ -276,6 +276,7 @@ export async function POST(req: NextRequest) {
       }
 
       const jobRecord = await JobManager.createJob({
+        id,
         url,
         mode,
         scopeConfig,

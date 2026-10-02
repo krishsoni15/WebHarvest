@@ -10,11 +10,17 @@ import {
   CaptureConfigDialog,
   CrawlConfigState,
 } from '@/components/capture/CaptureConfigDialog';
-import { FeatureHighlights } from '@/components/landing/FeatureHighlights';
 import { Footer } from '@/components/landing/Footer';
 import { RecentJobsModal, RecentJob } from '@/components/landing/RecentJobsModal';
 import { SlidersHorizontal } from 'lucide-react';
+import { ProductionAdvisoryBanner } from '@/components/landing/ProductionAdvisoryBanner';
+import { ProductionPreStartModal } from '@/components/landing/ProductionPreStartModal';
 import { DotGridBackground } from '@/components/reactbits/DotGridBackground';
+import { HeroBreathingGradient } from '@/components/landing/HeroBreathingGradient';
+import { UseCasesSection } from '@/components/landing/UseCasesSection';
+import { ArchitectureSection } from '@/components/landing/ArchitectureSection';
+import { ScrollReveal } from '@/components/ui/ScrollReveal';
+import { HeroScrollIndicator } from '@/components/landing/HeroScrollIndicator';
 
 export default function Home() {
   const router = useRouter();
@@ -23,6 +29,8 @@ export default function Home() {
   const [url, setUrl] = useState('');
   const [selectedPreset, setSelectedPreset] = useState<PresetKey>('full');
   const [serverError, setServerError] = useState<string | null>(null);
+  const [isProductionHost, setIsProductionHost] = useState(false);
+  const [isPreStartModalOpen, setIsPreStartModalOpen] = useState(false);
 
   // Crawl Configuration State - Zero-decision smart deep crawl defaults
   const [config, setConfig] = useState<CrawlConfigState>({
@@ -63,7 +71,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [recentJobs, setRecentJobs] = useState<RecentJob[]>([]);
 
-  // Load Recent Jobs from localStorage on mount
+  // Load Recent Jobs & Check Production Environment on mount
   useEffect(() => {
     try {
       const saved = localStorage.getItem('webharvest_recent_jobs');
@@ -73,7 +81,14 @@ export default function Home() {
           setRecentJobs(parsed);
         }
       }
-    } catch {}
+    } catch { }
+
+    if (typeof window !== 'undefined') {
+      const host = window.location.hostname;
+      if (host.includes('onrender.com') || (!host.includes('localhost') && !host.includes('127.0.0.1'))) {
+        setIsProductionHost(true);
+      }
+    }
   }, []);
 
   const handleSelectPreset = (preset: PresetKey) => {
@@ -108,6 +123,22 @@ export default function Home() {
   };
 
   const handleStartCapture = async () => {
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl) return;
+
+    let skipModal = false;
+    try {
+      skipModal = localStorage.getItem('webharvest_skip_prod_modal') === 'true';
+    } catch { }
+
+    if (isProductionHost && !skipModal) {
+      setIsPreStartModalOpen(true);
+    } else {
+      executeCapture();
+    }
+  };
+
+  const executeCapture = async () => {
     const trimmedUrl = url.trim();
     if (!trimmedUrl) return;
 
@@ -161,7 +192,7 @@ export default function Home() {
       setRecentJobs(updated);
       try {
         localStorage.setItem('webharvest_recent_jobs', JSON.stringify(updated));
-      } catch {}
+      } catch { }
 
       // Navigate immediately to live crawl dashboard
       window.location.href = `/mirror/${data.id}`;
@@ -175,7 +206,7 @@ export default function Home() {
     setRecentJobs([]);
     try {
       localStorage.removeItem('webharvest_recent_jobs');
-    } catch {}
+    } catch { }
   };
 
   const handleDeleteJob = (id: string) => {
@@ -183,7 +214,7 @@ export default function Home() {
     setRecentJobs(updated);
     try {
       localStorage.setItem('webharvest_recent_jobs', JSON.stringify(updated));
-    } catch {}
+    } catch { }
   };
 
   return (
@@ -198,15 +229,14 @@ export default function Home() {
         gap={24}
       />
 
-      {/* Full-screen Ambient Lighting: Top light cone & subtle atmospheric depth */}
-      <div className="pointer-events-none fixed top-0 left-1/2 -translate-x-1/2 w-[1200px] h-[550px] bg-[radial-gradient(ellipse_80%_50%_at_50%_0%,rgba(0,0,0,0.04),transparent_70%)] dark:bg-[radial-gradient(ellipse_80%_50%_at_50%_0%,rgba(255,255,255,0.09),transparent_70%)] -z-10" />
-      <div className="pointer-events-none fixed top-1/3 -left-40 w-96 h-96 bg-[radial-gradient(circle,rgba(0,0,0,0.02),transparent_70%)] dark:bg-[radial-gradient(circle,rgba(255,255,255,0.03),transparent_70%)] -z-10" />
-      <div className="pointer-events-none fixed top-1/2 -right-40 w-96 h-96 bg-[radial-gradient(circle,rgba(0,0,0,0.02),transparent_70%)] dark:bg-[radial-gradient(circle,rgba(255,255,255,0.03),transparent_70%)] -z-10" />
+      {/* ✨ Serin-style Breathing Animated Gradient Background (Curved Horizon Arc) */}
+      <HeroBreathingGradient />
 
       {/* Navbar */}
       <Navbar
         onOpenRecent={() => setIsRecentJobsOpen(true)}
         recentCount={recentJobs.length}
+        onOpenConfig={() => setIsConfigDialogOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -226,6 +256,9 @@ export default function Home() {
           errorMessage={serverError}
         />
 
+        {/* Free Cloud Environment Advisory Banner (Shown on Render / Production) */}
+        <ProductionAdvisoryBanner />
+
         {/* 4 Clean Presets */}
         <CapturePresets
           selectedPreset={selectedPreset}
@@ -234,7 +267,7 @@ export default function Home() {
         />
 
         {/* Simple Configure Link */}
-        <div className="w-full max-w-4xl mx-auto mt-4 flex items-center justify-center">
+        <div className="w-full max-w-4xl mx-auto mt-3 mb-2 flex items-center justify-center">
           <button
             type="button"
             onClick={() => setIsConfigDialogOpen(true)}
@@ -245,8 +278,20 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Technical Capabilities */}
-        <FeatureHighlights />
+        {/* ✨ Serin-style Floating Down Chevron Scroll Indicator (Lifted 1% up with breathing clearance) */}
+        <HeroScrollIndicator />
+
+
+
+        {/* Section: What Traditional Tools Lack vs What WebHarvest Solves & Real-World Use Cases */}
+        <ScrollReveal delayMs={30}>
+          <UseCasesSection />
+        </ScrollReveal>
+
+        {/* Section: Detailed Responsive System Architecture, Flow Chart & Tech Behind It */}
+        <ScrollReveal delayMs={60}>
+          <ArchitectureSection />
+        </ScrollReveal>
       </main>
 
       {/* Footer */}
@@ -273,6 +318,17 @@ export default function Home() {
         jobs={recentJobs}
         onClearJobs={handleClearJobs}
         onDeleteJob={handleDeleteJob}
+      />
+
+      {/* Production Environment Pre-Start Advisory Modal */}
+      <ProductionPreStartModal
+        isOpen={isPreStartModalOpen}
+        onClose={() => setIsPreStartModalOpen(false)}
+        onConfirmCloudStart={() => {
+          setIsPreStartModalOpen(false);
+          executeCapture();
+        }}
+        targetUrl={url}
       />
     </div>
   );

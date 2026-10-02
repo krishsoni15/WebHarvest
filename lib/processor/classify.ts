@@ -148,15 +148,24 @@ export function classifyResource(
     };
   }
 
-  // 6. Images
+  // 6. Images (including Next.js dynamic image routes: /_next/image, /opengraph-image, /twitter-image, etc.)
+  const isNextImageRoute =
+    urlLower.includes('/_next/image') ||
+    urlLower.includes('/opengraph-image') ||
+    urlLower.includes('/twitter-image') ||
+    urlLower.includes('/apple-icon') ||
+    urlLower.includes('/favicon.ico') ||
+    (urlLower.includes('/image?') && (urlLower.includes('url=') || urlLower.includes('src=')));
+
   if (
     ctypeLower.startsWith('image/') ||
-    ['.png', '.jpg', '.jpeg', '.webp', '.svg', '.gif', '.ico', '.avif', '.bmp'].includes(ext)
+    ['.png', '.jpg', '.jpeg', '.webp', '.svg', '.gif', '.ico', '.avif', '.bmp'].includes(ext) ||
+    isNextImageRoute
   ) {
     return {
       type: 'image',
       action: 'download',
-      extension: ext || (ctypeLower.includes('svg') ? '.svg' : '.png'),
+      extension: ext || (ctypeLower.includes('svg') ? '.svg' : ctypeLower.includes('webp') ? '.webp' : '.png'),
       reason: 'Image resource',
     };
   }

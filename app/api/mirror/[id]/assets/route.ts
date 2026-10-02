@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
-import { resolveTargetDir, ensureJobExists } from '@/lib/resolveDir';
+import { resolveTargetDir, ensureJobExists, getBaseDownloadDir } from '@/lib/resolveDir';
 import { activeJobs } from '@/lib/jobStore';
 
 export async function GET(
@@ -18,22 +18,25 @@ export async function GET(
 
     const job = activeJobs.get(id)!;
 
-    // Caching layer: If job is completed, return the cached result immediately.
-    // If mirroring is in progress, throttle calculations to at most once per 4 seconds.
+    // Caching layer: If job is completed, return the cached result ONLY if it has assets.
+    // If mirroring is in progress, throttle calculations to at most once per 3 seconds.
     const now = Date.now();
-    if (job.cachedAssets) {
-      if (job.status === 'completed' || (now - (job.lastAssetsUpdate || 0) < 4000)) {
+    const forceRefresh = req.nextUrl.searchParams.get('refresh') === 'true';
+    if (!forceRefresh && job.cachedAssets && Array.isArray(job.cachedAssets.images) && job.cachedAssets.images.length > 0) {
+      if (job.status === 'completed' || (now - (job.lastAssetsUpdate || 0) < 3000)) {
         return NextResponse.json(job.cachedAssets);
       }
     }
 
+    const baseDir = getBaseDownloadDir(id);
     const targetDir = resolveTargetDir(id, job.hostname);
-    if (!fs.existsSync(targetDir)) {
+    if (!fs.existsSync(targetDir) && !fs.existsSync(baseDir)) {
       return NextResponse.json({ colors: [], images: [] });
     }
 
-    const images: Array<{ name: string; path: string; previewUrl: string; size: string }> = [];
+    const images: Array<{ name: string; path: string; previewUrl: string; size: string; type: string }> = [];
     const colorCounts: Record<string, number> = {};
+    const seenPaths = new Set<string>();
 
     // Regex patterns for CSS colors
     const hexRegex = /#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/g;
@@ -61,8 +64,9 @@ export async function GET(
       }
     }
 
-    function walk(dir: string) {
+    function walk(dir: string, rootDir: string) {
       try {
+        if (!fs.existsSync(dir)) return;
         const list = fs.readdirSync(dir);
         for (const file of list) {
           const fullPath = path.join(dir, file);
@@ -70,11 +74,14 @@ export async function GET(
 
           const stat = fs.statSync(fullPath);
           if (stat.isDirectory()) {
-            walk(fullPath);
+            walk(fullPath, rootDir);
           } else if (stat.isFile()) {
             const cleanFile = file.split('?')[0];
             const ext = path.extname(cleanFile).toLowerCase();
-            const rel = path.relative(targetDir, fullPath).replace(/\\/g, '/');
+            const rel = path.relative(rootDir, fullPath).replace(/\\/g, '/');
+
+            if (seenPaths.has(rel)) continue;
+            seenPaths.add(rel);
 
             const SYSTEM_IGNORED = [
               'crawl_logs.txt', 'job.json', 'report.json', 'package.json', 'package-lock.json',
@@ -82,14 +89,14 @@ export async function GET(
             ];
             if (SYSTEM_IGNORED.includes(file.toLowerCase())) continue;
 
-            const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.avif'];
+            const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.avif', '.bmp', '.tiff'];
             const svgExts = ['.svg'];
             const fontExts = ['.woff', '.woff2', '.ttf', '.otf', '.eot'];
-            const cssExts = ['.css'];
-            const jsExts = ['.js', '.mjs'];
-            const videoExts = ['.mp4', '.webm', '.ogg', '.mov'];
-            const audioExts = ['.mp3', '.wav', '.aac', '.flac'];
-            const docExts = ['.pdf'];
+            const cssExts = ['.css', '.scss', '.sass', '.less'];
+            const jsExts = ['.js', '.mjs', '.cjs'];
+            const videoExts = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv'];
+            const audioExts = ['.mp3', '.wav', '.aac', '.flac', '.m4a'];
+            const docExts = ['.pdf', '.ppt', '.pptx', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.json', '.xml', '.zip', '.txt'];
 
             const isImage = imageExts.includes(ext);
             const isSvg = svgExts.includes(ext);
@@ -116,7 +123,7 @@ export async function GET(
                 previewUrl: `/api/mirror/${id}/preview/${rel}`,
                 size: formatBytes(stat.size),
                 type,
-              } as any);
+              });
             }
 
             // Extract colors from CSS and HTML files (max 500KB)
@@ -131,11 +138,14 @@ export async function GET(
       } catch {}
     }
 
-    walk(targetDir);
+    walk(targetDir, targetDir);
+    if (baseDir !== targetDir) {
+      walk(baseDir, baseDir);
+    }
 
     // Color logic: parse, check HSL saturation/lightness, filter out grays and transparencies to extract brand colors
     const brandColors: Array<{ color: string; count: number }> = [];
-    const neutralColors: Array<{ color: string; count: number }> = [];
+    const defaultHarmonious = ['#2563eb', '#db2777', '#059669', '#d97706', '#7c3aed'];
 
     for (const [color, count] of Object.entries(colorCounts)) {
       const rgb = parseToRgb(color);
@@ -144,33 +154,30 @@ export async function GET(
       const sat = getSaturation(rgb.r, rgb.g, rgb.b);
       const l = getLightness(rgb.r, rgb.g, rgb.b);
 
-      // Exclude extreme whites/blacks from brand list
-      if (sat > 0.12 && l > 0.1 && l < 0.9) {
+      // Require genuine color saturation and balanced lightness to filter out grays, muddy off-whites, and near-blacks
+      const isGray = Math.abs(rgb.r - rgb.g) < 24 && Math.abs(rgb.g - rgb.b) < 24 && Math.abs(rgb.r - rgb.b) < 24;
+      if (!isGray && sat > 0.18 && l > 0.12 && l < 0.88) {
         brandColors.push({ color, count });
-      } else {
-        // Exclude default absolute black/white from showing in final palette if possible
-        if (color !== '#ffffff' && color !== '#000000' && color !== 'rgb(255,255,255)' && color !== 'rgb(0,0,0)') {
-          neutralColors.push({ color, count });
-        }
       }
     }
 
     // Sort by frequency
     brandColors.sort((a, b) => b.count - a.count);
-    neutralColors.sort((a, b) => b.count - a.count);
 
-    // Combine: Brand colors first, then fill remainder with neutral accent colors (max 5 main colors)
-    const combined = [
-      ...brandColors.map(c => c.color),
-      ...neutralColors.map(c => c.color)
-    ];
-
-    // Deduplicate array
-    const finalColors = Array.from(new Set(combined)).slice(0, 5);
+    // Pick top vibrant brand colors, filling up to 5 with harmonious palette if needed
+    const distinctBrand: string[] = [];
+    for (const b of brandColors) {
+      if (distinctBrand.length >= 5) break;
+      if (!distinctBrand.includes(b.color)) distinctBrand.push(b.color);
+    }
+    for (const def of defaultHarmonious) {
+      if (distinctBrand.length >= 5) break;
+      if (!distinctBrand.includes(def)) distinctBrand.push(def);
+    }
 
     const result = {
-      colors: finalColors,
-      images: images.slice(0, 100),
+      colors: distinctBrand.slice(0, 5),
+      images: images.slice(0, 2000),
     };
 
     // Update job cache

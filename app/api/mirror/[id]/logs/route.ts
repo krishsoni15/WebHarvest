@@ -15,9 +15,25 @@ export async function GET(
       return NextResponse.json({ logs: 'Waiting for crawl process to start...' });
     }
 
-    // Read up to 256KB of the log file tail for real-time streaming
+    // If download requested, serve entire log file as attachment
+    if (req.nextUrl.searchParams.get('download') === 'true') {
+      const fullLogs = fs.readFileSync(logFilePath, 'utf-8');
+      return new NextResponse(fullLogs, {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Content-Disposition': `attachment; filename="${id}-crawl-logs.txt"`,
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+        },
+      });
+    }
+
+    // Support configurable limit (default 3000, max 10000)
+    const limitParam = req.nextUrl.searchParams.get('limit');
+    const lineLimit = limitParam ? Math.min(Math.max(parseInt(limitParam, 10) || 3000, 100), 10000) : 3000;
+
+    // Read up to 1MB of the log file tail for real-time streaming
     const stat = fs.statSync(logFilePath);
-    const maxBytes = 256 * 1024;
+    const maxBytes = 1024 * 1024; // 1MB tail buffer
     let logs: string;
 
     if (stat.size <= maxBytes) {
@@ -34,12 +50,16 @@ export async function GET(
       logs = firstNewline >= 0 ? text.slice(firstNewline + 1) : text;
     }
 
-    // Return last 1000 lines for UI display
+    // Return last N lines for UI display
     const lines = logs.trim().split('\n');
-    const tailLines = lines.slice(-1000).join('\n');
+    const tailLines = lines.slice(-lineLimit).join('\n');
 
     return NextResponse.json(
-      { logs: tailLines || 'No log output yet.' },
+      {
+        logs: tailLines || 'No log output yet.',
+        totalLines: lines.length,
+        isTruncated: stat.size > maxBytes || lines.length > lineLimit,
+      },
       { headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' } }
     );
   } catch (err: any) {

@@ -171,6 +171,72 @@ export class ScopeEnforcer {
       }
     }
 
+    // 8. Spider Trap & Repeating Directory Segment Prevention (e.g. /image/image/image/...)
+    const segments = pathname.split('/').filter(Boolean);
+
+    // 8a. Consecutive duplicate segments check: e.g. /image/image, /category/category
+    for (let i = 0; i < segments.length - 1; i++) {
+      if (segments[i] === segments[i + 1]) {
+        return {
+          allowed: false,
+          reason: `Spider trap loop detected: consecutive repeating segment '${segments[i]}'`,
+        };
+      }
+    }
+
+    // 8b. Frequency of duplicate segments: no directory segment should appear >= 2 times in a path
+    const segmentCounts = new Map<string, number>();
+    for (const seg of segments) {
+      const count = (segmentCounts.get(seg) || 0) + 1;
+      segmentCounts.set(seg, count);
+      if (count >= 2) {
+        return {
+          allowed: false,
+          reason: `Spider trap loop detected: segment '${seg}' repeated ${count} times in path`,
+        };
+      }
+    }
+
+    // 8c. Directory depth sanity limit
+    if (segments.length > 8) {
+      return {
+        allowed: false,
+        reason: `Excessive directory nesting depth (${segments.length} segments)`,
+      };
+    }
+
+    // 8d. Reject static asset file extensions from being followed as navigable HTML pages
+    const assetExtensions = [
+      '.png', '.jpg', '.jpeg', '.webp', '.svg', '.gif', '.ico', '.avif', '.bmp',
+      '.css', '.js', '.mjs', '.map',
+      '.woff', '.woff2', '.ttf', '.eot', '.otf',
+      '.mp4', '.webm', '.mp3', '.wav', '.ogg',
+      '.pdf', '.zip', '.tar', '.gz'
+    ];
+    for (const ext of assetExtensions) {
+      if (pathname.endsWith(ext)) {
+        return {
+          allowed: false,
+          reason: `URL target is a static asset '${ext}', not a crawlable page`,
+        };
+      }
+    }
+
+    // 8e. Reject Next.js image optimization and App Router dynamic image routes from page crawl
+    if (
+      pathname === '/_next/image' ||
+      pathname.endsWith('/_next/image') ||
+      pathname.endsWith('/opengraph-image') ||
+      pathname.endsWith('/twitter-image') ||
+      pathname.endsWith('/apple-icon') ||
+      pathname.endsWith('/favicon.ico')
+    ) {
+      return {
+        allowed: false,
+        reason: 'URL target is a dynamic image endpoint, not a crawlable page',
+      };
+    }
+
     return { allowed: true };
   }
 

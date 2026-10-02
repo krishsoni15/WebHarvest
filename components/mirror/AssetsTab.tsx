@@ -341,7 +341,7 @@ export function AssetsTab({ id, assets = [] }: AssetsTabProps) {
                   ) : asset.type === 'js' ? (
                     <FileCode className="w-8 h-8 text-amber-500/70" />
                   ) : asset.type === 'font' ? (
-                    <Type className="w-8 h-8 text-purple-500/70" />
+                    <Type className="w-8 h-8 text-foreground/70" />
                   ) : asset.type === 'video' ? (
                     <Video className="w-8 h-8 text-rose-500/70" />
                   ) : asset.type === '3d' ? (

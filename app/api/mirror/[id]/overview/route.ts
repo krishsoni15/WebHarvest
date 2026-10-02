@@ -34,7 +34,25 @@ export async function GET(
       return NextResponse.json({ error: 'Download directory not found' }, { status: 404 });
     }
 
-    const stats = { pages: 0, images: 0, files: 0, size: 0 };
+    const stats = {
+      pages: 0,
+      images: 0,
+      css: 0,
+      js: 0,
+      fonts: 0,
+      media: 0,
+      documents: 0,
+      totalAssets: 0,
+      files: 0,
+      size: 0,
+    };
+
+    const imageExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.avif', '.bmp', '.tiff']);
+    const cssExts = new Set(['.css', '.scss', '.sass', '.less']);
+    const jsExts = new Set(['.js', '.mjs', '.cjs']);
+    const fontExts = new Set(['.woff', '.woff2', '.ttf', '.otf', '.eot']);
+    const mediaExts = new Set(['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mp3', '.wav', '.aac', '.flac', '.m4a']);
+    const docExts = new Set(['.pdf', '.ppt', '.pptx', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.json', '.xml', '.zip', '.txt']);
 
     function walk(dir: string) {
       try {
@@ -54,8 +72,26 @@ export async function GET(
             const ext = path.extname(cleanFile).toLowerCase();
             if (ext === '.html' || ext === '.htm') {
               stats.pages++;
-            } else if (['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico'].includes(ext)) {
+            } else if (imageExts.has(ext)) {
               stats.images++;
+              stats.totalAssets++;
+            } else if (cssExts.has(ext)) {
+              stats.css++;
+              stats.totalAssets++;
+            } else if (jsExts.has(ext)) {
+              stats.js++;
+              stats.totalAssets++;
+            } else if (fontExts.has(ext)) {
+              stats.fonts++;
+              stats.totalAssets++;
+            } else if (mediaExts.has(ext)) {
+              stats.media++;
+              stats.totalAssets++;
+            } else if (docExts.has(ext)) {
+              stats.documents++;
+              stats.totalAssets++;
+            } else {
+              stats.totalAssets++;
             }
           }
         }
@@ -135,7 +171,19 @@ export async function GET(
       }
     } catch {}
 
-    const fullContext = (job.url + ' ' + job.hostname + ' ' + htmlSample).toLowerCase();
+    // Inspect manifest.json resources for framework and CMS signals
+    let manifestUrls = '';
+    const manifestPath = path.join(baseDir, 'manifest.json');
+    if (fs.existsSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+        if (Array.isArray(manifest.resources)) {
+          manifestUrls = manifest.resources.map((r: any) => (r.url || '') + ' ' + (r.localPath || '')).join(' ').toLowerCase();
+        }
+      } catch {}
+    }
+
+    const fullContext = (job.url + ' ' + job.hostname + ' ' + htmlSample + ' ' + manifestUrls).toLowerCase();
 
     // 1. Template & Product Brand Fingerprints (e.g. Vuexy on Pixinvent)
     if (fullContext.includes('vuexy')) {
@@ -210,6 +258,13 @@ export async function GET(
       stats: {
         pages: stats.pages,
         images: stats.images,
+        css: stats.css,
+        js: stats.js,
+        fonts: stats.fonts,
+        media: stats.media,
+        documents: stats.documents,
+        totalAssets: stats.totalAssets,
+        assets: stats.totalAssets,
         files: stats.files,
         size: formatBytes(stats.size),
       },
@@ -232,8 +287,22 @@ function formatBytes(bytes: number) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
+function isVibrantBrandColor(hex: string): boolean {
+  if (hex.length !== 7) return false;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  if (isNaN(r) || isNaN(g) || isNaN(b)) return false;
+  const isGray = Math.abs(r - g) < 24 && Math.abs(g - b) < 24 && Math.abs(r - b) < 24;
+  if (isGray) return false;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  if (max < 35 || min > 230) return false; // avoid pitch black or washed out white
+  return true;
+}
+
 function extractColorsFromDir(baseDir: string): string[] {
-  const defaultPalette = ['#e11d48', '#06b6d4', '#10b981', '#84cc16', '#a855f7'];
+  const defaultPalette = ['#2563eb', '#db2777', '#059669', '#d97706', '#7c3aed'];
   try {
     const cssFiles: string[] = [];
     function findCss(dir: string) {
@@ -258,9 +327,8 @@ function extractColorsFromDir(baseDir: string): string[] {
 
     const colorCounts = new Map<string, number>();
     const hexRegex = /#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g;
-    const ignoredColors = new Set(['#fff', '#ffffff', '#000', '#000000', '#111', '#111111', '#222', '#222222', '#333', '#333333', '#eee', '#eeeeee', '#f5f5f5', '#fafafa', '#ccc', '#cccccc', '#ddd', '#dddddd']);
 
-    for (const file of cssFiles.slice(0, 5)) {
+    for (const file of cssFiles.slice(0, 10)) {
       try {
         const text = fs.readFileSync(file, 'utf-8');
         let match;
@@ -269,7 +337,7 @@ function extractColorsFromDir(baseDir: string): string[] {
           if (hex.length === 4) {
             hex = `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`;
           }
-          if (!ignoredColors.has(hex)) {
+          if (isVibrantBrandColor(hex)) {
             colorCounts.set(hex, (colorCounts.get(hex) || 0) + 1);
           }
         }
@@ -280,17 +348,16 @@ function extractColorsFromDir(baseDir: string): string[] {
       .sort((a, b) => b[1] - a[1])
       .map(([hex]) => hex);
 
-    if (sortedColors.length >= 3) {
-      const distinct: string[] = [];
-      for (const c of sortedColors) {
-        if (distinct.length >= 5) break;
-        if (!distinct.includes(c)) distinct.push(c);
-      }
-      while (distinct.length < 5) {
-        distinct.push(defaultPalette[distinct.length % defaultPalette.length]);
-      }
-      return distinct.slice(0, 5);
+    const distinct: string[] = [];
+    for (const c of sortedColors) {
+      if (distinct.length >= 5) break;
+      if (!distinct.includes(c)) distinct.push(c);
     }
+    for (const def of defaultPalette) {
+      if (distinct.length >= 5) break;
+      if (!distinct.includes(def)) distinct.push(def);
+    }
+    return distinct.slice(0, 5);
   } catch {}
   return defaultPalette;
 }

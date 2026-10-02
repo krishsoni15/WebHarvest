@@ -15,6 +15,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { AssetItem } from './AssetsTab';
+import { ColorPaletteModal } from './ColorPaletteModal';
 
 interface ProjectDashboardCardProps {
   id: string;
@@ -31,6 +32,7 @@ interface ProjectDashboardCardProps {
   crawlLogs?: string;
   onBrowseFiles: () => void;
   onBrowseAssets: () => void;
+  onBrowsePages?: () => void;
   onOpenLogs?: () => void;
   onDownloadZip: () => void;
   isDownloadingZip?: boolean;
@@ -51,12 +53,14 @@ export function ProjectDashboardCard({
   crawlLogs = '',
   onBrowseFiles,
   onBrowseAssets,
+  onBrowsePages,
   onOpenLogs,
   onDownloadZip,
   isDownloadingZip = false,
 }: ProjectDashboardCardProps) {
   const [copiedColor, setCopiedColor] = useState<string | null>(null);
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
+  const [isColorModalOpen, setIsColorModalOpen] = useState(false);
 
   const handleCopyColor = (color: string) => {
     navigator.clipboard.writeText(color);
@@ -87,12 +91,11 @@ export function ProjectDashboardCard({
         return split.slice(-4);
       }
     }
-    const now = new Date().toISOString();
     return [
-      `[${now}] [SAVED] captured: ${hostname || 'target'} assets`,
-      `[${now}] [CRAWL] (${pagesCount}/${pagesCount || 1}) Linked local references`,
-      `[${now}] [SAVED] Bundled ${filesCount || assetsCount} resources`,
-      `[${now}] [FINISH] WebHarvest snapshot compiled successfully`,
+      `[SAVED] captured: ${hostname || 'target'} assets`,
+      `[CRAWL] (${pagesCount}/${pagesCount || 1}) Linked local references`,
+      `[SAVED] Bundled ${filesCount || assetsCount} resources`,
+      `[FINISH] WebHarvest snapshot compiled successfully`,
     ];
   }, [crawlLogs, hostname, pagesCount, filesCount, assetsCount]);
 
@@ -139,11 +142,18 @@ export function ProjectDashboardCard({
             {totalSize}
           </span>
         </div>
-        <div>
-          <span className="text-[9px] font-mono tracking-wider text-muted-foreground uppercase block mb-0.5">
-            FILES CAPTURED
-          </span>
-          <span className="text-base font-bold font-mono text-foreground tracking-tight">
+        <div
+          onClick={onBrowseFiles}
+          className="cursor-pointer group hover:bg-muted/30 p-1 -m-1 rounded-md transition-colors"
+          title="Click to view all captured files"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[9px] font-mono tracking-wider text-muted-foreground uppercase block mb-0.5 group-hover:text-foreground transition-colors">
+              FILES CAPTURED
+            </span>
+            <span className="text-[10px] text-muted-foreground group-hover:text-foreground opacity-60 group-hover:opacity-100 transition-opacity">↗</span>
+          </div>
+          <span className="text-base font-bold font-mono text-foreground tracking-tight group-hover:underline">
             {filesCount}
           </span>
         </div>
@@ -160,17 +170,23 @@ export function ProjectDashboardCard({
       </div>
 
       {/* 5. Colors Palette Dots */}
-      <div className="flex items-center justify-between py-0.5">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[9px] font-mono tracking-wider text-muted-foreground uppercase">
+      <div className="flex items-center justify-between py-1 px-1 rounded-md hover:bg-muted/30 transition-colors">
+        <button
+          type="button"
+          onClick={() => setIsColorModalOpen(true)}
+          className="flex items-center gap-1.5 cursor-pointer group"
+          title="Open full color palette inspector"
+        >
+          <span className="text-[9px] font-mono tracking-wider text-muted-foreground uppercase group-hover:text-foreground">
             COLORS
           </span>
+          <span className="text-[10px] font-mono text-muted-foreground group-hover:text-foreground opacity-60">↗</span>
           {copiedColor && (
-            <span className="text-[9px] font-mono text-foreground font-semibold animate-in fade-in">
+            <span className="text-[9px] font-mono text-emerald-500 font-semibold animate-in fade-in">
               Copied {copiedColor}!
             </span>
           )}
-        </div>
+        </button>
         <div className="flex items-center gap-1.5">
           {colors.slice(0, 5).map((color, idx) => (
             <button
@@ -186,17 +202,32 @@ export function ProjectDashboardCard({
               )}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => setIsColorModalOpen(true)}
+            className="text-[9px] font-mono text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded border border-border/70 bg-muted/40 hover:bg-muted/80 cursor-pointer ml-0.5 transition-colors"
+            title="Inspect & export palette"
+          >
+            Palette
+          </button>
         </div>
       </div>
 
       {/* 6. Pages and Assets Dual Cards */}
       <div className="grid grid-cols-2 gap-2 pt-0.5">
         {/* Pages Card */}
-        <div className="p-2.5 rounded-lg border border-border bg-muted/20 flex flex-col justify-between space-y-2 hover:border-foreground/30 transition-colors">
+        <div
+          onClick={onBrowsePages || onBrowseFiles}
+          className="p-2.5 rounded-lg border border-border bg-muted/20 flex flex-col justify-between space-y-2 hover:border-foreground/40 hover:bg-muted/30 transition-all cursor-pointer group shadow-2xs"
+          title="Click to view all pages"
+        >
           <div>
-            <span className="text-[9px] font-mono tracking-wider text-muted-foreground uppercase block mb-0.5">
-              PAGES
-            </span>
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-[9px] font-mono tracking-wider text-muted-foreground uppercase group-hover:text-foreground transition-colors">
+                PAGES
+              </span>
+              <span className="text-[10px] text-muted-foreground group-hover:text-foreground opacity-60 group-hover:opacity-100 transition-opacity">↗</span>
+            </div>
             <div className="text-xl font-bold font-mono text-foreground">
               {pagesCount}
             </div>
@@ -210,22 +241,25 @@ export function ProjectDashboardCard({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onBrowseFiles}
-            className="text-[11px] font-medium text-foreground hover:underline inline-flex items-center gap-1 cursor-pointer pt-0.5"
-          >
-            <span>Browse Files</span>
-            <span className="text-muted-foreground">&rarr;</span>
-          </button>
+          <div className="text-[11px] font-medium text-foreground group-hover:underline inline-flex items-center gap-1 pt-0.5">
+            <span>Browse Pages</span>
+            <span className="text-muted-foreground group-hover:translate-x-0.5 transition-transform">&rarr;</span>
+          </div>
         </div>
 
         {/* Assets Card */}
-        <div className="p-2.5 rounded-lg border border-border bg-muted/20 flex flex-col justify-between space-y-2 hover:border-foreground/30 transition-colors">
+        <div
+          onClick={onBrowseAssets}
+          className="p-2.5 rounded-lg border border-border bg-muted/20 flex flex-col justify-between space-y-2 hover:border-foreground/40 hover:bg-muted/30 transition-all cursor-pointer group shadow-2xs"
+          title="Click to view all media and assets"
+        >
           <div>
-            <span className="text-[9px] font-mono tracking-wider text-muted-foreground uppercase block mb-0.5">
-              ASSETS
-            </span>
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-[9px] font-mono tracking-wider text-muted-foreground uppercase group-hover:text-foreground transition-colors">
+                ASSETS
+              </span>
+              <span className="text-[10px] text-muted-foreground group-hover:text-foreground opacity-60 group-hover:opacity-100 transition-opacity">↗</span>
+            </div>
             <div className="text-xl font-bold font-mono text-foreground">
               {assetsCount}
             </div>
@@ -258,14 +292,10 @@ export function ProjectDashboardCard({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onBrowseAssets}
-            className="text-[11px] font-medium text-foreground hover:underline inline-flex items-center gap-1 cursor-pointer pt-0.5"
-          >
+          <div className="text-[11px] font-medium text-foreground group-hover:underline inline-flex items-center gap-1 pt-0.5">
             <span>Browse Assets</span>
-            <span className="text-muted-foreground">&rarr;</span>
-          </button>
+            <span className="text-muted-foreground group-hover:translate-x-0.5 transition-transform">&rarr;</span>
+          </div>
         </div>
       </div>
 
@@ -339,17 +369,42 @@ export function ProjectDashboardCard({
         {/* Terminal preview box */}
         <div
           onClick={onOpenLogs}
-          className="p-2.5 rounded-lg bg-zinc-950 dark:bg-black/90 border border-zinc-800 text-[10px] space-y-0.5 text-zinc-200 font-mono leading-relaxed overflow-hidden cursor-pointer hover:border-zinc-700 transition-colors shadow-2xs"
-          title="Click to open logs terminal"
+          className="p-2.5 rounded-lg bg-zinc-950 dark:bg-black/90 border border-zinc-800 text-[10px] space-y-1.5 text-zinc-200 font-mono leading-relaxed overflow-hidden cursor-pointer hover:border-zinc-700 transition-colors shadow-2xs group"
+          title="Click to expand logs terminal"
         >
-          {logLines.map((line, idx) => (
-            <div key={idx} className="truncate flex items-start gap-1">
-              <span className="text-zinc-500 select-none">$</span>
-              <span className="truncate text-zinc-300">
-                {line.replace(/^\$\s*/, '')}
-              </span>
-            </div>
-          ))}
+          {logLines.map((rawLine, idx) => {
+            let time = '';
+            let line = rawLine.trim();
+            const timeMatch = line.match(/^(\d{4}-\d{2}-\d{2}T)?(\d{2}:\d{2}:\d{2})(?:\.\d+Z)?\s*(.*)$/);
+            if (timeMatch) {
+              time = timeMatch[2];
+              line = timeMatch[3];
+            }
+            const tagMatch = line.match(/^\[([A-Z0-9_\-]+)\]\s*(.*)$/i);
+            const tag = tagMatch ? tagMatch[1].toUpperCase() : '';
+            const text = tagMatch ? tagMatch[2] : line.replace(/^\$\s*/, '');
+
+            let badgeStyle = 'bg-zinc-800 text-zinc-300 border-zinc-700';
+            if (tag === 'SAVED') badgeStyle = 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
+            else if (tag === 'CRAWL' || tag === 'FETCH') badgeStyle = 'bg-sky-500/15 text-sky-400 border-sky-500/30';
+            else if (tag === 'ASSET' || tag === 'MEDIA') badgeStyle = 'bg-zinc-800 text-zinc-200 border-zinc-700';
+            else if (tag === 'FINISH' || tag === 'DONE') badgeStyle = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 font-bold';
+            else if (tag === 'WARN' || tag === 'ERROR') badgeStyle = 'bg-rose-500/15 text-rose-400 border-rose-500/30';
+
+            return (
+              <div key={idx} className="flex items-center gap-1.5 min-w-0" suppressHydrationWarning>
+                {time && <span className="text-zinc-500 text-[9px] shrink-0">{time}</span>}
+                {tag && (
+                  <span className={`text-[8px] font-bold px-1 py-0.5 rounded border shrink-0 uppercase tracking-wider ${badgeStyle}`}>
+                    {tag}
+                  </span>
+                )}
+                <span className="truncate text-zinc-300 group-hover:text-zinc-100 transition-colors">
+                  {text}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -401,6 +456,13 @@ export function ProjectDashboardCard({
           </button>
         </div>
       </div>
+
+      {/* 10. Interactive Color Palette Inspector Modal */}
+      <ColorPaletteModal
+        isOpen={isColorModalOpen}
+        onClose={() => setIsColorModalOpen(false)}
+        colors={colors}
+      />
     </div>
   );
 }

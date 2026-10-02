@@ -18,12 +18,14 @@ export function ProgressHeader({
   const clampedProgress = Math.min(100, Math.max(0, Math.round(progress)));
 
   const formatEta = (seconds: number | null | undefined) => {
+    if (status === 'completed') return 'Done (100%)';
+    if (status === 'paused') return 'Paused';
     if (seconds === null || seconds === undefined || isNaN(seconds) || seconds <= 0) {
-      return status === 'completed' ? 'Done' : 'ETA: 2m 14s';
+      return 'Estimating ETA...';
     }
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
-    return `ETA: ${mins}m ${secs}s`;
+    return mins > 0 ? `ETA ~${mins}m ${secs}s` : `ETA ~${secs}s`;
   };
 
   return (

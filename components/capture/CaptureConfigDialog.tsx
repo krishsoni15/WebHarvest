@@ -57,10 +57,10 @@ export function CaptureConfigDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in-50 duration-150">
-      <div className="relative w-full max-w-lg rounded-xl border border-border bg-card shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-xs animate-in fade-in-50 duration-150">
+      <div className="relative w-full max-w-lg rounded-xl border border-border bg-card shadow-xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+        <div className="px-4 sm:px-5 py-3.5 sm:py-4 border-b border-border flex items-center justify-between">
           <div className="flex items-center gap-2">
             <SlidersHorizontal className="w-4 h-4 text-foreground" />
             <h2 className="text-sm font-semibold text-foreground">
@@ -77,7 +77,7 @@ export function CaptureConfigDialog({
         </div>
 
         {/* Body */}
-        <div className="p-5 space-y-4 overflow-y-auto text-xs">
+        <div className="p-4 sm:p-5 space-y-4 overflow-y-auto text-xs">
           {/* Target URL */}
           <div>
             <label className="font-medium text-foreground block mb-1">
@@ -97,7 +97,7 @@ export function CaptureConfigDialog({
             <label className="font-medium text-foreground block mb-1.5">
               Crawl Strategy & Scope
             </label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 sm:gap-2">
               {[
                 { id: 'full', label: 'Unlimited Deep Crawl' },
                 { id: 'tree', label: 'Entire Website' },
@@ -117,7 +117,7 @@ export function CaptureConfigDialog({
                       updateField('crawlDepth', 0);
                     }
                   }}
-                  className={`p-2 rounded-lg border text-center transition-all cursor-pointer font-medium ${
+                  className={`p-2 rounded-lg border text-center transition-all cursor-pointer font-medium text-xs ${
                     config.scopeMode === s.id
                       ? 'border-foreground bg-foreground text-background shadow-xs'
                       : 'border-border bg-background text-muted-foreground hover:text-foreground'
@@ -141,7 +141,7 @@ export function CaptureConfigDialog({
             <label className="font-medium text-foreground block mb-1.5">
               Crawler Engine
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2">
               {[
                 { id: 'auto', label: 'Auto (Smart Hybrid)' },
                 { id: 'browser', label: 'Playwright (Full Browser)' },
@@ -152,7 +152,7 @@ export function CaptureConfigDialog({
                   key={eng.id}
                   type="button"
                   onClick={() => updateField('crawlMode', eng.id as any)}
-                  className={`p-2 rounded-lg border text-left transition-all cursor-pointer font-medium ${
+                  className={`p-2 rounded-lg border text-left transition-all cursor-pointer font-medium text-xs ${
                     config.crawlMode === eng.id
                       ? 'border-foreground bg-foreground text-background shadow-xs'
                       : 'border-border bg-background text-muted-foreground hover:text-foreground'
@@ -175,14 +175,14 @@ export function CaptureConfigDialog({
                   Default: Unlimited (50,000+)
                 </span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
                 <Input
                   type="number"
                   value={config.maxPages}
                   onChange={(e) => updateField('maxPages', parseInt(e.target.value) || 50000)}
-                  className="h-8 text-xs font-mono flex-1"
+                  className="h-8 text-xs font-mono flex-1 min-w-[120px]"
                 />
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 shrink-0">
                   {[500, 1000, 5000, 50000].map((num) => (
                     <button
                       key={num}

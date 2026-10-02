@@ -4,7 +4,7 @@ export interface Job {
   id: string;
   url: string;
   hostname: string;
-  status: 'downloading' | 'completed' | 'failed' | 'cancelled';
+  status: 'downloading' | 'completed' | 'failed' | 'cancelled' | 'paused';
   error?: string;
   addedAt: number;
   completedAt?: number;
@@ -17,17 +17,27 @@ export interface Job {
   lastFilesUpdate?: number;
 }
 
+export interface JobControl {
+  isPaused: boolean;
+  isCancelled: boolean;
+  purgeOnCancel?: boolean;
+  pausePromiseResolve?: (() => void) | null;
+}
+
 // Persist the jobs map across hot-reloads in Next.js dev server
 const globalForJobs = global as unknown as {
   activeJobs?: Map<string, Job>;
   activeProcesses?: Map<string, ChildProcess>;
+  activeJobControls?: Map<string, JobControl>;
 };
 
 export const activeJobs = globalForJobs.activeJobs || new Map<string, Job>();
 export const activeProcesses = globalForJobs.activeProcesses || new Map<string, ChildProcess>();
+export const activeJobControls = globalForJobs.activeJobControls || new Map<string, JobControl>();
 
 // Force reload comment update to reset global cache
 if (process.env.NODE_ENV !== 'production') {
   globalForJobs.activeJobs = activeJobs;
   globalForJobs.activeProcesses = activeProcesses;
+  globalForJobs.activeJobControls = activeJobControls;
 }

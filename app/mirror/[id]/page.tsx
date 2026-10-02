@@ -17,6 +17,7 @@ import { FilesTab, FileNode } from '@/components/mirror/FilesTab';
 import { HealthTab, HealthIssueItem } from '@/components/mirror/HealthTab';
 import { LogsTab } from '@/components/mirror/LogsTab';
 import { DraggableTerminal } from '@/components/crawl/DraggableTerminal';
+import { CancelConfirmationModal } from '@/components/crawl/CancelConfirmationModal';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import {
@@ -32,6 +33,8 @@ import {
   Layers,
   FolderTree,
   MonitorPlay,
+  Clock,
+  Gauge,
 } from 'lucide-react';
 
 interface StatsState {
@@ -45,17 +48,31 @@ interface StatsState {
   totalSize: number;
 }
 
+function formatTime(seconds: number) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m < 60) {
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+  const h = Math.floor(m / 60);
+  const remM = m % 60;
+  return `${h}:${remM.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
 export default function MirrorPage() {
   const params = useParams();
   const id = params.id as string;
   const router = useRouter();
 
   // Status & Progress State
-  const [status, setStatus] = useState<'downloading' | 'completed' | 'failed'>('downloading');
+  const [status, setStatus] = useState<'downloading' | 'completed' | 'failed' | 'paused'>('downloading');
   const [isPaused, setIsPaused] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(15);
   const [currentAction, setCurrentAction] = useState('Discovering pages and downloading resources');
   const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [crawlSpeed, setCrawlSpeed] = useState(0);
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const [error, setError] = useState('');
 
   // Target Metadata
@@ -136,6 +153,19 @@ export default function MirrorPage() {
         // Stream logs in real-time from SSE
         if (data.logs && typeof data.logs === 'string' && data.logs.length > 0) {
           setCrawlLogs(prev => data.logs.length > prev.length ? data.logs : prev);
+
+          // Extract real-time active action/stage without making extra API calls
+          const lines = data.logs.trim().split('\n');
+          for (let i = lines.length - 1; i >= 0; i--) {
+            const rawLine = lines[i].trim();
+            if (!rawLine) continue;
+            // Clean timestamp and severity prefix e.g. [2026-10-02T18:24:23.150Z] [INFO]
+            const clean = rawLine.replace(/^\[\d{4}-\d{2}-\d{2}T[^\]]+\]\s*(\[[A-Z]+\]\s*)?/, '').trim();
+            if (clean && !clean.startsWith('Cataloged') && !clean.startsWith('Saved snapshot')) {
+              setCurrentAction(clean);
+              break;
+            }
+          }
         }
 
         if (data.hostname) setJobHostname(data.hostname);
@@ -157,11 +187,17 @@ export default function MirrorPage() {
           eventSource.close();
           fetchAllCompletedData();
         } else if (data.status === 'downloading') {
-          // Dynamic progress estimation
+          // Dynamic progress calculation incorporating stage milestones
           const totalFiles = (data.stats?.html || 0) + (data.stats?.css || 0) + (data.stats?.images || 0) + (data.stats?.js || 0);
-          const calculated = Math.min(95, Math.max(15, Math.floor(Math.log(totalFiles + 1) * 16)));
+          let calculated = Math.min(88, Math.max(15, Math.floor(Math.log(totalFiles + 1) * 16)));
+          if (data.logs && typeof data.logs === 'string') {
+            if (data.logs.includes('[STAGE 3/4]')) {
+              calculated = Math.max(calculated, 92);
+            } else if (data.logs.includes('[STAGE 2/4]')) {
+              calculated = Math.max(calculated, 45);
+            }
+          }
           setLoadingProgress(calculated);
-          setCurrentAction('Downloading assets and rewriting relative links...');
         } else if (data.status === 'failed') {
           setStatus('failed');
           eventSource.close();
@@ -172,9 +208,10 @@ export default function MirrorPage() {
     };
 
     eventSource.onerror = () => {
-      eventSource.close();
-      // On connection close / error, query overview to check final status
-      fetchOverview();
+      // Don't kill reconnecting SSE stream; only query overview if permanently closed
+      if (eventSource.readyState === EventSource.CLOSED) {
+        fetchOverview();
+      }
     };
 
     return () => {
@@ -182,10 +219,31 @@ export default function MirrorPage() {
     };
   }, [id]);
 
-  // Polling fallback to check status
+  // Live elapsed timer & ETA computation
+  useEffect(() => {
+    if (status !== 'downloading') return;
+    const timer = setInterval(() => {
+      setElapsedSeconds((prev) => {
+        const next = prev + 1;
+        const totalItems = (stats.html || 0) + (stats.images || 0) + (stats.css || 0) + (stats.js || 0);
+        if (next > 2 && totalItems > 0) {
+          setCrawlSpeed(parseFloat((totalItems / next).toFixed(1)));
+        }
+        if (loadingProgress > 10 && loadingProgress < 99 && next > 4) {
+          const estimatedTotal = next / (loadingProgress / 100);
+          const remaining = Math.max(1, Math.round(estimatedTotal - next));
+          setEtaSeconds(remaining);
+        }
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [status, loadingProgress, stats]);
+
+  // Polling fallback to check status (uses in-memory cache to save CPU)
   const fetchOverview = async () => {
     try {
-      const res = await fetch(`/api/mirror/${id}/overview?refresh=true`);
+      const res = await fetch(`/api/mirror/${id}/overview`);
       if (res.ok) {
         const data = await res.json();
         if (data.status) setStatus(data.status);
@@ -194,6 +252,16 @@ export default function MirrorPage() {
         if (data.techStack) setTechStack(data.techStack);
         if (data.colors && Array.isArray(data.colors) && data.colors.length > 0) setColors(data.colors);
         if (data.stats?.size) setTotalSizeFormatted(data.stats.size);
+        if (data.stats?.files) {
+          setStats((prev) => ({
+            ...prev,
+            totalFiles: data.stats.files,
+            html: data.stats.pages || prev.html,
+            images: data.stats.images || prev.images,
+            css: data.stats.css || prev.css,
+            js: data.stats.js || prev.js,
+          }));
+        }
 
         if (data.status === 'completed') {
           setLoadingProgress(100);
@@ -240,16 +308,14 @@ export default function MirrorPage() {
     } catch {}
   };
 
-  // Periodically fetch discovered files and status during active crawl
+  // Refresh discovered files periodically during active crawl with low frequency (SSE delivers real-time logs & stats)
   useEffect(() => {
     if (!id || status !== 'downloading') return;
 
     fetchFiles();
-    fetchOverview();
     const interval = setInterval(() => {
       fetchFiles();
-      fetchOverview();
-    }, 3500);
+    }, 15000);
 
     return () => clearInterval(interval);
   }, [id, status, jobHostname]);
@@ -328,15 +394,37 @@ export default function MirrorPage() {
   };
 
   // Actions
-  const handleTogglePause = () => {
-    setIsPaused(!isPaused);
+  const handleTogglePause = async () => {
+    const nextPaused = !isPaused;
+    setIsPaused(nextPaused);
+    try {
+      if (nextPaused) {
+        await fetch(`/api/mirror/${id}/pause`, { method: 'POST' });
+      } else {
+        await fetch(`/api/mirror/${id}/resume`, { method: 'POST' });
+      }
+    } catch (err) {
+      console.error('Failed to toggle pause state', err);
+    }
   };
 
-  const handleCancel = async () => {
+  const handleCancelClick = () => {
+    setIsCancelModalOpen(true);
+  };
+
+  const handleConfirmKeepSnapshot = async () => {
     try {
-      await fetch(`/api/mirror/${id}/cancel`, { method: 'POST' });
-      setStatus('failed');
-      setError('Crawl cancelled by user.');
+      await fetch(`/api/mirror/${id}/cancel?keepSnapshot=true`, { method: 'POST' });
+      setStatus('completed');
+      setLoadingProgress(100);
+      fetchAllCompletedData();
+    } catch {}
+  };
+
+  const handleConfirmPurgeData = async () => {
+    try {
+      await fetch(`/api/mirror/${id}/cancel?purge=true`, { method: 'POST' });
+      router.push('/');
     } catch {}
   };
 
@@ -392,7 +480,7 @@ export default function MirrorPage() {
   return (
     <div className="h-screen max-h-screen flex flex-col bg-background text-foreground antialiased selection:bg-foreground selection:text-background overflow-hidden">
       {/* 1. Header (Switches between Live Crawl Header and Completed Mirror Header) */}
-      {status === 'downloading' || status === 'failed' ? (
+      {status === 'downloading' || status === 'failed' || status === 'paused' ? (
         <CrawlHeader
           id={id}
           hostname={jobHostname}
@@ -401,7 +489,7 @@ export default function MirrorPage() {
           engineMode={engineMode}
           isPaused={isPaused}
           onTogglePause={handleTogglePause}
-          onCancel={handleCancel}
+          onCancel={handleCancelClick}
           onExportSnapshot={handleDownloadZip}
           onOpenLogs={() => setIsTerminalOpen(true)}
         />
@@ -424,7 +512,7 @@ export default function MirrorPage() {
       )}
 
       {/* Main Container - Full Fluid Screen Space Utilization with ZERO outer scrollbar */}
-      <main className="flex-1 min-h-0 w-full max-w-full px-3 sm:px-5 lg:px-6 xl:px-8 py-2 flex flex-col overflow-hidden">
+      <main className="flex-1 min-h-0 w-full max-w-full px-1.5 sm:px-4 lg:px-6 xl:px-8 py-1 sm:py-2 flex flex-col overflow-hidden">
         {/* Error Banner when Failed */}
         {status === 'failed' && (
           <div className="p-4 rounded-xl border border-destructive/50 bg-destructive/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
@@ -460,19 +548,24 @@ export default function MirrorPage() {
         {status === 'downloading' ? (
           crawlViewMode === 'preview' ? (
             /* Live Screen Preview Mode: Ultra-sleek single-viewport height layout with NO outer scrollbar! */
-            <div className="flex-1 min-h-0 flex flex-col space-y-2 h-full overflow-hidden">
-              {/* Ultra-compact Live Control Strip (~38px) */}
-              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 rounded-lg border border-border/80 bg-card/60 backdrop-blur-md shrink-0 text-xs">
+            <div className="flex-1 min-h-0 flex flex-col space-y-1.5 sm:space-y-2 h-full overflow-hidden">
+              {/* Ultra-compact Live Control Strip (~36px) */}
+              <div className="flex items-center justify-between gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-border/80 bg-card/60 backdrop-blur-md shrink-0 text-xs">
                 {/* Left: View Switcher */}
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
                   <button
                     type="button"
                     onClick={() => setCrawlViewMode('preview')}
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold bg-foreground text-background shadow-xs cursor-pointer"
+                    className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 rounded-md text-xs font-semibold cursor-pointer whitespace-nowrap transition-colors ${
+                      crawlViewMode === 'preview'
+                        ? 'bg-foreground text-background shadow-xs'
+                        : 'border border-border/60 bg-muted/30 text-muted-foreground hover:text-foreground'
+                    }`}
                   >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>Live Screen Preview</span>
-                    <span className="flex h-1.5 w-1.5 relative ml-0.5">
+                    <Eye className="w-3.5 h-3.5 shrink-0" />
+                    <span className="hidden sm:inline">Live Screen Preview</span>
+                    <span className="sm:hidden">Preview</span>
+                    <span className="flex h-1.5 w-1.5 relative ml-0.5 shrink-0">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-background opacity-75" />
                       <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-background" />
                     </span>
@@ -481,28 +574,59 @@ export default function MirrorPage() {
                   <button
                     type="button"
                     onClick={() => setCrawlViewMode('activity')}
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium border border-border/60 bg-muted/30 text-muted-foreground hover:text-foreground cursor-pointer"
+                    className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 rounded-md text-xs font-medium cursor-pointer whitespace-nowrap transition-colors border border-border/60 bg-muted/30 text-muted-foreground hover:text-foreground"
                   >
-                    <Activity className="w-3.5 h-3.5" />
-                    <span>Engine Stream & Coverage</span>
+                    <Activity className="w-3.5 h-3.5 shrink-0" />
+                    <span className="hidden sm:inline">Engine Stream & Coverage</span>
+                    <span className="sm:hidden">Stream</span>
                   </button>
                 </div>
 
-                {/* Center: Live Progress Bar & Status Text */}
-                <div className="hidden md:flex items-center gap-2.5 flex-1 max-w-md mx-3">
+                {/* Center: Mobile Progress & ETA indicator */}
+                <div className="flex md:hidden items-center gap-1.5 text-[11px] font-mono text-muted-foreground truncate">
+                  <span className="font-bold text-foreground">{loadingProgress}%</span>
+                  {etaSeconds !== null && etaSeconds > 0 && (
+                    <span className="text-emerald-500 font-medium truncate">~{formatTime(etaSeconds)}</span>
+                  )}
+                </div>
+
+                {/* Center (Desktop): Live Progress Bar, Speedometer & Timer HUD */}
+                <div className="hidden md:flex items-center gap-2.5 flex-1 max-w-lg mx-3">
                   <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden border border-border/50">
                     <div
                       className="h-full bg-foreground transition-all duration-300 rounded-full"
                       style={{ width: `${loadingProgress}%` }}
                     />
                   </div>
-                  <span className="text-[11px] font-mono text-muted-foreground whitespace-nowrap shrink-0 truncate max-w-[220px]">
-                    {loadingProgress}% • {currentAction}
-                  </span>
+                  <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground whitespace-nowrap shrink-0">
+                    <span className="font-bold text-foreground">{loadingProgress}%</span>
+                    <span>•</span>
+                    <span className="flex items-center gap-1" title="Elapsed Crawl Time">
+                      <Clock className="w-3 h-3 text-muted-foreground" />
+                      <span>{formatTime(elapsedSeconds)}</span>
+                    </span>
+                    {etaSeconds !== null && etaSeconds > 0 && (
+                      <>
+                        <span>•</span>
+                        <span className="text-emerald-500 font-medium" title="Estimated Time Remaining">
+                          ETA ~{formatTime(etaSeconds)}
+                        </span>
+                      </>
+                    )}
+                    {crawlSpeed > 0 && (
+                      <>
+                        <span>•</span>
+                        <span className="text-sky-400 font-medium flex items-center gap-1" title="Current Harvesting Speed">
+                          <Gauge className="w-3 h-3" />
+                          <span>{crawlSpeed}/s</span>
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
 
                 {/* Right: Metric Chips & Terminal Trigger */}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <div className="hidden lg:flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground">
                     <span className="px-2 py-0.5 rounded bg-muted/60 border border-border/60">
                       <strong className="text-foreground">{pagesDiscovered || htmlPages.length}</strong> pgs
@@ -518,7 +642,7 @@ export default function MirrorPage() {
                   <button
                     type="button"
                     onClick={() => setIsTerminalOpen(true)}
-                    className="p-1 px-2 rounded-md border border-border/60 bg-muted/30 text-muted-foreground hover:text-foreground text-xs font-mono flex items-center gap-1 cursor-pointer"
+                    className="p-1 px-2 rounded-md border border-border/60 bg-muted/30 text-muted-foreground hover:text-foreground text-xs font-mono flex items-center gap-1 cursor-pointer shrink-0"
                     title="Toggle Live Stream Logs"
                   >
                     <Terminal className="w-3.5 h-3.5" />
@@ -566,31 +690,33 @@ export default function MirrorPage() {
               />
 
               {/* View Switcher */}
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 pb-2">
-                <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 pb-2">
+                <div className="flex items-center gap-1.5 sm:gap-2">
                   <button
                     type="button"
                     onClick={() => setCrawlViewMode('preview')}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium border border-border/60 bg-card text-muted-foreground hover:text-foreground cursor-pointer"
+                    className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-md text-xs font-medium border border-border/60 bg-card text-muted-foreground hover:text-foreground cursor-pointer"
                   >
                     <Eye className="w-3.5 h-3.5" />
-                    <span>Live Screen Preview</span>
+                    <span className="hidden sm:inline">Live Screen Preview</span>
+                    <span className="sm:hidden">Preview</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setCrawlViewMode('activity')}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-semibold bg-foreground text-background shadow-xs cursor-pointer"
+                    className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-md text-xs font-semibold bg-foreground text-background shadow-xs cursor-pointer"
                   >
                     <Activity className="w-3.5 h-3.5" />
-                    <span>Engine Stream & Coverage</span>
+                    <span className="hidden sm:inline">Engine Stream & Coverage</span>
+                    <span className="sm:hidden">Stream</span>
                   </button>
                 </div>
 
-                <div className="text-[11px] font-mono text-muted-foreground flex items-center gap-2">
-                  <span>Capturing live mirror</span>
-                  <span className="w-1 h-1 rounded-full bg-foreground" />
-                  <span className="text-foreground">{jobHostname || 'target site'}</span>
+                <div className="text-[11px] font-mono text-muted-foreground flex items-center gap-1.5 truncate">
+                  <span className="hidden sm:inline">Capturing live mirror</span>
+                  <span className="hidden sm:inline w-1 h-1 rounded-full bg-foreground" />
+                  <span className="text-foreground truncate">{jobHostname || 'target site'}</span>
                 </div>
               </div>
 
@@ -779,6 +905,17 @@ export default function MirrorPage() {
           hostname={jobHostname}
           isCrawling={status === 'downloading'}
           onClearLogs={() => setCrawlLogs('')}
+        />
+
+        {/* Safe Cancel Confirmation Modal */}
+        <CancelConfirmationModal
+          isOpen={isCancelModalOpen}
+          onClose={() => setIsCancelModalOpen(false)}
+          onConfirmKeep={handleConfirmKeepSnapshot}
+          onConfirmPurge={handleConfirmPurgeData}
+          hostname={jobHostname}
+          pagesCount={pagesDiscovered}
+          filesCount={stats.totalFiles || pagesDiscovered + assetsDiscovered}
         />
       </main>
     </div>

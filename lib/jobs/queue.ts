@@ -89,6 +89,42 @@ export class BackgroundJobQueue extends EventEmitter {
   }
 
   /**
+   * Pause an active crawling job.
+   */
+  pause(jobId: string): boolean {
+    const activeEngine = this.activeEngines.get(jobId);
+    if (activeEngine) {
+      activeEngine.pause();
+      const j = activeJobs.get(jobId);
+      if (j) {
+        j.status = 'paused';
+        activeJobs.set(jobId, j);
+      }
+      this.emit('job:paused', { jobId });
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Resume a paused crawling job.
+   */
+  resume(jobId: string): boolean {
+    const activeEngine = this.activeEngines.get(jobId);
+    if (activeEngine) {
+      activeEngine.resume();
+      const j = activeJobs.get(jobId);
+      if (j) {
+        j.status = 'downloading';
+        activeJobs.set(jobId, j);
+      }
+      this.emit('job:resumed', { jobId });
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Check if a job is currently actively crawling
    */
   isRunning(jobId: string): boolean {

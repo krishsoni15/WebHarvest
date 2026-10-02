@@ -59,17 +59,17 @@ export function MirrorHeader({
   return (
     <header className="w-full bg-card/90 backdrop-blur-md border-b border-border/80 sticky top-0 z-30 shadow-xs">
       {/* Unified Executive Navigation Bar */}
-      <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 h-16 flex items-center justify-between gap-4">
+      <div className="w-full px-2.5 sm:px-6 lg:px-8 xl:px-10 h-13 sm:h-16 flex items-center justify-between gap-2 sm:gap-4">
         {/* Left: Brand + Target Domain + Status + Metrics */}
-        <div className="flex items-center gap-3.5 min-w-0">
+        <div className="flex items-center gap-2 sm:gap-3.5 min-w-0 shrink">
           {/* Logo & Brand */}
-          <Link href="/" className="flex items-center gap-2.5 group shrink-0">
-            <div className="w-9 h-9 rounded-xl border border-border/80 bg-zinc-950 flex items-center justify-center overflow-hidden p-1.5 shadow-sm ring-1 ring-border/50 group-hover:ring-foreground/40 group-hover:scale-105 transition-all">
-              <WebHarvestLogo className="w-full h-full object-contain" size={36} />
+          <Link href="/" className="flex items-center gap-1.5 sm:gap-2.5 group shrink-0">
+            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-xl border border-border/80 bg-zinc-950 flex items-center justify-center overflow-hidden p-1 sm:p-1.5 shadow-sm ring-1 ring-border/50 group-hover:ring-foreground/40 group-hover:scale-105 transition-all">
+              <WebHarvestLogo className="w-full h-full object-contain" size={32} />
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className="font-bold text-base text-foreground tracking-tight">WebHarvest</span>
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-border bg-muted/80 text-muted-foreground font-semibold">
+            <div className="flex items-center gap-1">
+              <span className="font-bold text-xs sm:text-base text-foreground tracking-tight">WebHarvest</span>
+              <span className="hidden xs:inline-block text-[9px] sm:text-[10px] font-mono px-1 sm:px-1.5 py-0.2 sm:py-0.5 rounded border border-border bg-muted/80 text-muted-foreground font-semibold">
                 V3
               </span>
             </div>
@@ -82,7 +82,7 @@ export function MirrorHeader({
             href={url || `https://${hostname}`}
             target="_blank"
             rel="noreferrer"
-            className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border border-border/70 bg-muted/30 hover:bg-muted/70 text-xs font-mono font-medium text-foreground transition-colors max-w-[260px] truncate group shadow-xs shrink-0"
+            className="hidden md:inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border border-border/70 bg-muted/30 hover:bg-muted/70 text-xs font-mono font-medium text-foreground transition-colors max-w-[260px] truncate group shadow-xs shrink-0"
             title={url || `https://${hostname}`}
           >
             <Globe className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground shrink-0" />
@@ -91,14 +91,14 @@ export function MirrorHeader({
           </a>
 
           {/* Status Badge */}
-          <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs font-mono font-medium shrink-0">
+          <div className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-0.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-[10px] sm:text-xs font-mono font-medium shrink-0">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
             <span className="capitalize">{status}</span>
           </div>
         </div>
 
         {/* Right: Actions, Download, GitHub & Theme */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <Link
             href="/"
             className="hidden md:inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors font-medium px-2.5 py-1.5 rounded-md hover:bg-muted"
@@ -113,10 +113,12 @@ export function MirrorHeader({
               size="sm"
               onClick={onDownloadZip}
               disabled={isDownloadingZip}
-              className="h-8 text-xs gap-1.5 bg-foreground text-background hover:bg-foreground/90 font-medium px-3.5 rounded-md transition-all cursor-pointer shadow-xs"
+              className="h-7 sm:h-8 text-xs gap-1 sm:gap-1.5 bg-foreground text-background hover:bg-foreground/90 font-medium px-2.5 sm:px-3.5 rounded-md transition-all cursor-pointer shadow-xs"
+              title="Download entire offline mirror bundle as ZIP"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>{isDownloadingZip ? 'Packaging...' : 'Download ZIP'}</span>
+              <span className="hidden sm:inline">{isDownloadingZip ? 'Packaging...' : 'Download ZIP'}</span>
+              <span className="sm:hidden">{isDownloadingZip ? '...' : 'ZIP'}</span>
             </Button>
           </ClickSpark>
 

@@ -100,13 +100,12 @@ export function LogsTab({ id, rawLogs }: LogsTabProps) {
   };
 
   const handleDownload = () => {
-    const blob = new Blob([effectiveLogs], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = `webharvest-mirror-${id}.log`;
+    a.href = `/api/mirror/${id}/logs?download=true`;
+    a.download = `webharvest-mirror-${id}.txt`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
   };
 
   return (

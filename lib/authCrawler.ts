@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { activeJobs, Job } from '@/lib/jobStore';
+import { activeJobs, activeJobControls, Job } from '@/lib/jobStore';
 import { launchChromiumSafe } from '@/lib/crawler/playwrightHelper';
 
 /**
@@ -352,7 +352,7 @@ async function runHttpAuthFallback({
   email: string;
   maxPages: number;
   appendLog: (msg: string) => void;
-  updateJobState: (status: 'downloading' | 'completed' | 'failed', errMessage?: string) => void;
+  updateJobState: (status: 'downloading' | 'completed' | 'failed' | 'cancelled' | 'paused', errMessage?: string) => void;
 }) {
   appendLog('[FALLBACK] Starting high-res HTTP cloner and asset harvester...');
   try {
@@ -372,6 +372,20 @@ async function runHttpAuthFallback({
     const activeDemoTag = demoMatch ? demoMatch[1].toLowerCase() : 'demo-1';
 
     for (let idx = 0; idx < urlsToCrawl.length; idx++) {
+      const ctrl = activeJobControls.get(id);
+      if (ctrl?.isCancelled) {
+        appendLog(`[CRAWL CANCELLED] Stopped by user at page ${idx + 1}`);
+        break;
+      }
+      while (ctrl?.isPaused && !ctrl?.isCancelled) {
+        appendLog(`[PAUSED] Crawl paused at page ${idx + 1}. Waiting for resume...`);
+        await new Promise<void>((resolve) => {
+          if (ctrl) ctrl.pausePromiseResolve = resolve;
+          setTimeout(resolve, 1000);
+        });
+      }
+      if (ctrl?.isCancelled) break;
+
       const pageUrl = urlsToCrawl[idx];
       if (downloadedUrls.has(pageUrl)) continue;
       downloadedUrls.add(pageUrl);
@@ -448,46 +462,56 @@ async function runHttpAuthFallback({
           if (href) assetUrls.push(href);
         });
 
-        for (const rawAsset of assetUrls) {
-          if (!rawAsset || rawAsset.startsWith('data:') || rawAsset.startsWith('#') || rawAsset.startsWith('javascript:')) continue;
-          try {
-            const resolvedAssetUrl = new URL(rawAsset, pageUrl).href;
-            if (downloadedUrls.has(resolvedAssetUrl)) continue;
-            downloadedUrls.add(resolvedAssetUrl);
+        // Fetch assets in concurrent batches of 12 for 5x-10x faster harvesting
+        const validAssets = assetUrls.filter(
+          (raw) => raw && !raw.startsWith('data:') && !raw.startsWith('#') && !raw.startsWith('javascript:')
+        );
+        const assetBatchSize = 12;
+        for (let b = 0; b < validAssets.length; b += assetBatchSize) {
+          const batch = validAssets.slice(b, b + assetBatchSize);
+          await Promise.all(
+            batch.map(async (rawAsset) => {
+              try {
+                const resolvedAssetUrl = new URL(rawAsset, pageUrl).href;
+                if (downloadedUrls.has(resolvedAssetUrl)) return;
+                downloadedUrls.add(resolvedAssetUrl);
 
-            const assetPathname = new URL(resolvedAssetUrl).pathname.replace(/^\/+/, '');
-            const localAssetFile = path.join(targetDir, assetPathname);
-            fs.mkdirSync(path.dirname(localAssetFile), { recursive: true });
+                const assetPathname = new URL(resolvedAssetUrl).pathname.replace(/^\/+/, '');
+                const localAssetFile = path.join(targetDir, assetPathname);
+                fs.mkdirSync(path.dirname(localAssetFile), { recursive: true });
 
-            if (!fs.existsSync(localAssetFile)) {
-              const assetRes = await fetch(resolvedAssetUrl, {
-                headers: {
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                },
-              });
-              if (assetRes.ok) {
-                const arrayBuf = await assetRes.arrayBuffer();
-                const buf = Buffer.from(arrayBuf);
-                fs.writeFileSync(localAssetFile, buf);
-                savedAssetsCount++;
+                if (!fs.existsSync(localAssetFile)) {
+                  const assetRes = await fetch(resolvedAssetUrl, {
+                    headers: {
+                      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    },
+                    signal: AbortSignal.timeout(10000),
+                  });
+                  if (assetRes.ok) {
+                    const arrayBuf = await assetRes.arrayBuffer();
+                    const buf = Buffer.from(arrayBuf);
+                    fs.writeFileSync(localAssetFile, buf);
+                    savedAssetsCount++;
 
-                if (assetPathname.includes('assets/')) {
-                  const alias = path.join(targetDir, assetPathname.slice(assetPathname.indexOf('assets/')));
-                  if (!fs.existsSync(alias)) {
-                    fs.mkdirSync(path.dirname(alias), { recursive: true });
-                    fs.writeFileSync(alias, buf);
+                    if (assetPathname.includes('assets/')) {
+                      const alias = path.join(targetDir, assetPathname.slice(assetPathname.indexOf('assets/')));
+                      if (!fs.existsSync(alias)) {
+                        fs.mkdirSync(path.dirname(alias), { recursive: true });
+                        fs.writeFileSync(alias, buf);
+                      }
+                    }
+                    if (assetPathname.includes('images/')) {
+                      const alias = path.join(targetDir, assetPathname.slice(assetPathname.indexOf('images/')));
+                      if (!fs.existsSync(alias)) {
+                        fs.mkdirSync(path.dirname(alias), { recursive: true });
+                        fs.writeFileSync(alias, buf);
+                      }
+                    }
                   }
                 }
-                if (assetPathname.includes('images/')) {
-                  const alias = path.join(targetDir, assetPathname.slice(assetPathname.indexOf('images/')));
-                  if (!fs.existsSync(alias)) {
-                    fs.mkdirSync(path.dirname(alias), { recursive: true });
-                    fs.writeFileSync(alias, buf);
-                  }
-                }
-              }
-            }
-          } catch {}
+              } catch {}
+            })
+          );
         }
 
         // Inject Offline Resilience Shield into HTML
@@ -534,6 +558,16 @@ async function runHttpAuthFallback({
       } catch (pageErr: any) {
         appendLog(`[HTTP WARN] Failed crawling ${pageUrl}: ${pageErr.message}`);
       }
+    }
+
+    const ctrl = activeJobControls.get(id);
+    if (ctrl?.isCancelled && ctrl?.purgeOnCancel) {
+      appendLog(`[PURGE] Crawl cancelled and files purged by operator.`);
+      try {
+        fs.rmSync(downloadDir, { recursive: true, force: true });
+      } catch {}
+      updateJobState('cancelled');
+      return;
     }
 
     // Ensure index.html ALWAYS exists in targetDir and downloadDir
@@ -612,7 +646,7 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
     } catch {}
   };
 
-  const updateJobState = (status: 'downloading' | 'completed' | 'failed', errMessage?: string) => {
+  const updateJobState = (status: 'downloading' | 'completed' | 'failed' | 'cancelled' | 'paused', errMessage?: string) => {
     const job: Job = {
       id,
       url: effectiveTargetUrl,
@@ -1002,6 +1036,20 @@ export async function runAuthCrawler(options: AuthCrawlerOptions) {
       appendLog(`[CRAWL] Starting deep crawl queue (${maxPages >= 50000 ? 'Unlimited pages mode' : `Up to ${maxPages} pages`})`);
 
       while (crawlQueue.length > 0 && pageCount < maxPages) {
+        const ctrl = activeJobControls.get(id);
+        if (ctrl?.isCancelled) {
+          appendLog(`[CRAWL CANCELLED] Stopped by user at page ${pageCount + 1}`);
+          break;
+        }
+        while (ctrl?.isPaused && !ctrl?.isCancelled) {
+          appendLog(`[PAUSED] Playwright crawl paused. Waiting for resume...`);
+          await new Promise<void>((resolve) => {
+            if (ctrl) ctrl.pausePromiseResolve = resolve;
+            setTimeout(resolve, 1000);
+          });
+        }
+        if (ctrl?.isCancelled) break;
+
         const pageUrl = crawlQueue.shift()!;
         if (crawledUrls.has(pageUrl)) continue;
         crawledUrls.add(pageUrl);

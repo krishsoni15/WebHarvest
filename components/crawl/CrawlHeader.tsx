@@ -53,16 +53,16 @@ export function CrawlHeader({
 
   return (
     <header className="w-full bg-card/90 backdrop-blur-md border-b border-border/80 sticky top-0 z-30 shadow-xs">
-      <div className="w-full px-3 sm:px-5 lg:px-6 xl:px-8 h-15 sm:h-16 flex items-center justify-between gap-3">
+      <div className="w-full px-2.5 sm:px-5 lg:px-6 xl:px-8 h-13 sm:h-16 flex items-center justify-between gap-1.5 sm:gap-3">
         {/* Left: Brand + Target Info + Status + Engine */}
-        <div className="flex items-center gap-3 min-w-0">
-          <Link href="/" className="flex items-center gap-2 group shrink-0">
-            <div className="w-8 h-8 rounded-lg border border-border/80 bg-zinc-950 flex items-center justify-center overflow-hidden p-1 shadow-xs ring-1 ring-border/50">
-              <WebHarvestLogo className="w-full h-full object-contain" size={32} />
+        <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 shrink">
+          <Link href="/" className="flex items-center gap-1.5 sm:gap-2 group shrink-0">
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg border border-border/80 bg-zinc-950 flex items-center justify-center overflow-hidden p-1 shadow-xs ring-1 ring-border/50">
+              <WebHarvestLogo className="w-full h-full object-contain" size={28} />
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className="font-bold text-sm text-foreground tracking-tight">WebHarvest</span>
-              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded border border-border bg-muted/80 text-muted-foreground font-semibold">
+            <div className="flex items-center gap-1">
+              <span className="font-bold text-xs sm:text-sm text-foreground tracking-tight">WebHarvest</span>
+              <span className="hidden xs:inline-block text-[9px] sm:text-[10px] font-mono px-1 py-0.2 rounded border border-border bg-muted/80 text-muted-foreground font-semibold">
                 V3
               </span>
             </div>
@@ -71,15 +71,15 @@ export function CrawlHeader({
           <div className="h-4 w-px bg-border/80 hidden sm:block shrink-0" />
 
           {/* Target Hostname */}
-          <div className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border/70 bg-muted/30 text-xs font-mono font-medium text-foreground truncate max-w-[200px] lg:max-w-xs shrink-0">
+          <div className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border/70 bg-muted/30 text-xs font-mono font-medium text-foreground truncate max-w-[180px] lg:max-w-xs shrink-0">
             <Globe className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
             <span className="truncate">{hostname || 'Target Website'}</span>
           </div>
 
           {/* Live crawling badge */}
-          <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border border-border bg-card text-foreground text-xs font-mono font-medium shrink-0">
+          <div className="flex items-center gap-1 sm:gap-1.5 px-2 py-0.5 rounded-full border border-border bg-card text-foreground text-[10px] sm:text-xs font-mono font-medium shrink-0">
             <span className={`w-1.5 h-1.5 rounded-full ${isPaused ? 'bg-muted-foreground' : 'bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]'}`} />
-            <span>{isPaused ? 'Paused' : 'Crawling...'}</span>
+            <span>{isPaused ? 'Paused' : 'Crawling'}</span>
           </div>
 
           {/* Engine */}
@@ -89,7 +89,7 @@ export function CrawlHeader({
         </div>
 
         {/* Right: Actions, Logs, Pause, Cancel, GitHub & Theme */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           <Link
             href="/"
             className="hidden md:inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors font-medium px-2 py-1 rounded-md hover:bg-muted"
@@ -104,11 +104,11 @@ export function CrawlHeader({
               variant="outline"
               size="sm"
               onClick={onOpenLogs}
-              className="h-8 text-xs gap-1.5 border-border cursor-pointer hover:bg-muted font-mono"
+              className="h-7 sm:h-8 px-2 sm:px-2.5 text-xs gap-1 border-border cursor-pointer hover:bg-muted font-mono hidden sm:inline-flex"
               title="Open Draggable Terminal Logs"
             >
               <Terminal className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Logs</span>
+              <span>Logs</span>
             </Button>
           )}
 
@@ -118,7 +118,8 @@ export function CrawlHeader({
               variant="outline"
               size="sm"
               onClick={onTogglePause}
-              className="h-8 text-xs gap-1.5 cursor-pointer"
+              className="h-7 sm:h-8 px-2 sm:px-2.5 text-xs gap-1 cursor-pointer"
+              title={isPaused ? "Resume Crawl" : "Pause Crawl"}
             >
               {isPaused ? (
                 <>
@@ -140,7 +141,8 @@ export function CrawlHeader({
               variant="outline"
               size="sm"
               onClick={onCancel}
-              className="h-8 text-xs text-destructive hover:bg-destructive/10 border-border gap-1.5 cursor-pointer"
+              className="h-7 sm:h-8 px-2 sm:px-2.5 text-xs text-destructive hover:bg-destructive/10 border-border gap-1 cursor-pointer"
+              title="Interrupt & Cancel Crawl"
             >
               <XCircle className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Cancel</span>
@@ -154,7 +156,8 @@ export function CrawlHeader({
                 variant="default"
                 size="sm"
                 onClick={onExportSnapshot}
-                className="h-8 text-xs gap-1.5 bg-foreground text-background hover:bg-foreground/90 font-medium cursor-pointer"
+                className="h-7 sm:h-8 px-2 sm:px-2.5 text-xs gap-1 bg-foreground text-background hover:bg-foreground/90 font-medium cursor-pointer"
+                title="Export Captured Snapshot"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Export</span>
